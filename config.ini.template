@@ -1,0 +1,15 @@
+[database]
+sql_server_name = 
+sql_db_name = 
+supplier_key = 1
+
+[p21]
+p21_customer_id = 
+p21_ship_to_id = 
+p21_contract_id = 
+location_id = 10
+po_prefix = 
+
+[email]
+email_to = VMI@afi-tools.com
+email_cc = 
