@@ -1,14 +1,14 @@
+"""
+VMI Update Process - Machine Configuration Collector
 
-#VMI Update Process - Gets all specific info from individual Matrix Machine
+Run this once on each machine during setup or migration.
+Automatically pulls existing config from environment variables and the
+current db.py (if present), prompts for anything missing, then writes
+config.ini and stores API credentials in Windows Credential Manager.
 
-#Run this once on each machine during setup or migration.
-#Automatically pulls existing config from environment variables and the
-#current db.py (if present), prompts for anything missing, then writes
-#config.ini and runs credential setup.
-
-#To run:
-#    python collect_config.py
-
+Usage:
+    python collect_config.py
+"""
 
 import os
 import re
@@ -21,22 +21,21 @@ CONFIG_PATH = os.path.join(SCRIPT_DIR, 'config.ini')
 DB_PATH = os.path.join(SCRIPT_DIR, 'db.py')
 SERVICE_NAME = 'VMI_AFI'
 
+
 def auto_detect():
-    # Pull whatever we can from existing env vars and db.py
+    #Pull whatever we can from existing env vars and db.py
     detected = {}
 
-    # Environment variables, most machines just have SQL_SERVER_NAME and SQL_DB_NAME
     for key in ['SQL_SERVER_NAME', 'SQL_DB_NAME', 'P21_CUSTOMER_ID', 'P21_SHIP_TO_ID', 'SUPPLIER_KEY']:
         val = os.environ.get(key, '')
         if val:
             detected[key] = val
 
-    # Supplier key from hardcoded value in db.py, almost never in env vars
+    # Supplier key from hardcoded value in old db.py if not in env vars
     if 'SUPPLIER_KEY' not in detected and os.path.exists(DB_PATH):
         try:
             with open(DB_PATH, 'r') as f:
                 content = f.read()
-            # Look for hardcoded supplier_key = N in SQL queries
             match = re.search(r'supplier_key\s*=\s*(\d+)', content)
             if match:
                 detected['SUPPLIER_KEY'] = match.group(1)
@@ -73,9 +72,8 @@ def collect():
 
     detected = auto_detect()
 
-    # Report what was auto-detected
     for key, val in detected.items():
-        if key not in ['SUPPLIER_KEY']:  # already printed above for db.py source
+        if key != 'SUPPLIER_KEY':
             print(f'  [auto] {key} = {val}')
 
     print()
@@ -88,7 +86,7 @@ def collect():
     sql_db = prompt('SQL Database Name', detected.get('SQL_DB_NAME'))
     supplier_key = prompt('Supplier Key', detected.get('SUPPLIER_KEY', '1'))
 
-    #P21
+    # P21
     print()
     print('--- P21 ---')
     customer_id = prompt('P21 Customer ID', detected.get('P21_CUSTOMER_ID'))
@@ -179,9 +177,35 @@ def collect():
     print(f'  Email CC       : {email_cc or "(not set)"}')
     print(f'  API Credentials: stored in Credential Manager')
     print()
-    print('You can verify credentials anytime with: python setup_credentials.py --verify')
+    print('You can verify credentials anytime with: python collect_config.py --verify')
     print('You can edit config.ini directly at: ' + CONFIG_PATH)
 
 
+def verify():
+    print()
+    print('Verifying stored credentials...')
+    base_url = keyring.get_password(SERVICE_NAME, 'P21_BASE_URL')
+    username = keyring.get_password(SERVICE_NAME, 'P21_API_USERNAME')
+    password = keyring.get_password(SERVICE_NAME, 'P21_API_PASSWORD')
+
+    if base_url and username and password:
+        print('P21_BASE_URL     : ' + base_url)
+        print('P21_API_USERNAME : ' + username)
+        print('P21_API_PASSWORD : ' + '*' * len(password))
+        print()
+        print('All credentials found.')
+    else:
+        missing = []
+        if not base_url: missing.append('P21_BASE_URL')
+        if not username: missing.append('P21_API_USERNAME')
+        if not password: missing.append('P21_API_PASSWORD')
+        print('Missing credentials: ' + ', '.join(missing))
+        print('Please re-run collect_config.py to store them.')
+
+
 if __name__ == '__main__':
-    collect()
+    import sys
+    if '--verify' in sys.argv:
+        verify()
+    else:
+        collect()

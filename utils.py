@@ -5,12 +5,16 @@ Handles order validation, email notifications, and helper functions
 
 from smtplib import SMTP
 from ssl import create_default_context
-from os import path, rename, environ
+from os import path, rename
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from log import l_log_location
 from datetime import datetime
+from config import get_email_to, get_email_cc, get_contract_id
+
+SMTP_FROM = 'afireports@afi-tools.com'
+SMTP_PASSWORD = 'Sog36064'
 
 
 def check_order(p_dict, p_item_list):
@@ -57,11 +61,8 @@ def coalesce(p_value):
 
 
 def get_contract():
-    """Get P21 contract ID from environment variable, default to NONE"""
-    try:
-        return environ['P21_CONTRACT_ID']
-    except KeyError:
-        return 'NONE'
+    """Get P21 contract ID from config, default to NONE"""
+    return get_contract_id() or 'NONE'
 
 
 def rename_log():
@@ -80,12 +81,16 @@ def email(p_subject, p_message="", p_log=True, p_attach=True):
         p_log     : if True, attach/embed the log file
         p_attach  : if True, attach log as file; if False, embed in body
     """
-    l_recip = ['VMI@afi-tools.com']
+    l_to = get_email_to()
+    l_cc = get_email_cc()
+    l_all_recip = l_to + l_cc
 
     msg = MIMEMultipart()
     msg['Subject'] = p_subject
-    msg['From'] = 'afireports@afi-tools.com'
-    msg['To'] = ','.join(l_recip)
+    msg['From'] = SMTP_FROM
+    msg['To'] = ','.join(l_to)
+    if l_cc:
+        msg['Cc'] = ','.join(l_cc)
 
     if p_log:
         with open(l_log_location, 'r') as f:
@@ -102,6 +107,6 @@ def email(p_subject, p_message="", p_log=True, p_attach=True):
     context = create_default_context()
     s = SMTP('smtp.office365.com', 587)
     s.starttls(context=context)
-    s.login(msg['From'], 'Sog36064')
-    s.sendmail(msg['From'], l_recip, msg.as_string())
+    s.login(SMTP_FROM, SMTP_PASSWORD)
+    s.sendmail(SMTP_FROM, l_all_recip, msg.as_string())
     s.quit()

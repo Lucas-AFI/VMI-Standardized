@@ -1,22 +1,26 @@
 """
-VMI Update Process - One-Time Credential Setup
+VMI Update Process - Credential Setup (standalone)
 
-Run this script once per machine during initial deployment.
-Must be run as the same Windows user that the scheduled tasks run as.
+Use this only if you need to update credentials without re-running
+the full collect_config.py setup.
 
 Usage:
     python setup_credentials.py
+    python setup_credentials.py --verify
 """
 
 import keyring
 import getpass
+import sys
 
 SERVICE_NAME = 'VMI_AFI'
 
+
 def setup():
+    print()
     print('VMI Credential Setup')
     print('=' * 40)
-    print('These credentials will be stored securely in Windows Credential Manager.')
+    print('Credentials will be stored in Windows Credential Manager.')
     print('Run this as the same user account that the scheduled tasks run as.')
     print()
 
@@ -30,9 +34,11 @@ def setup():
 
     print()
     print('Credentials stored successfully.')
-    print('You can verify by running: python setup_credentials.py --verify')
+    print('Verify anytime with: python setup_credentials.py --verify')
+
 
 def verify():
+    print()
     print('Verifying stored credentials...')
     base_url = keyring.get_password(SERVICE_NAME, 'P21_BASE_URL')
     username = keyring.get_password(SERVICE_NAME, 'P21_API_USERNAME')
@@ -50,10 +56,10 @@ def verify():
         if not username: missing.append('P21_API_USERNAME')
         if not password: missing.append('P21_API_PASSWORD')
         print('Missing credentials: ' + ', '.join(missing))
-        print('Please re-run setup_credentials.py to store them.')
+        print('Please re-run collect_config.py to store them.')
+
 
 if __name__ == '__main__':
-    import sys
     if '--verify' in sys.argv:
         verify()
     else:

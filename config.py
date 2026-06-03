@@ -41,7 +41,7 @@ def get_supplier_key():
     return int(_get('database', 'supplier_key', fallback='1'))
 
 
-# P21
+# P21 enpoints
 
 def get_customer_id():
     return _get('p21', 'p21_customer_id', required=True)
@@ -59,7 +59,7 @@ def get_po_prefix():
     return _get('p21', 'po_prefix', fallback=None)
 
 
-#Email
+# For Email
 
 def get_email_to():
     raw = _get('email', 'email_to', required=True)

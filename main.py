@@ -18,7 +18,7 @@ from xml_processor import build_order, add_line_item, print_xml
 
 
 def items():
-    """Sync item prices from P21 API to local Matrix database"""
+    # Sync item prices from P21 API to local Matrix database
     l_tot_cnt = 0
     l_succ_cnt = 0
 
@@ -57,7 +57,7 @@ def items():
 
 
 def orders(p_quote=None):
-    """Submit pending Matrix purchase orders to P21"""
+    # Submit pending Matrix purchase orders to P21
     l_tot_cnt = 0
     l_succ_cnt = 0
 

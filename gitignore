@@ -1,5 +1,6 @@
-# Credentials — never commit these
+# Credentials and machine-specific config — never commit these
 credentials.enc
+config.ini
 *.env
 .env
 
