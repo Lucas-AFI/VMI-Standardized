@@ -12,4 +12,8 @@ po_prefix =
 
 [email]
 email_to = VMI@afi-tools.com
-email_cc = 
+email_cc =
+
+[health]
+client_name =
+endpoint_url = https://<your-azure-vm>/health/intake

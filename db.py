@@ -10,6 +10,7 @@ from utils import email, rename_log
 from api import get_customer_name
 from log import log_info, log_warning, log_error, log_shutdown
 from config import get_sql_server_name, get_sql_db_name, get_supplier_key
+import health
 
 SUPPLIER_KEY = get_supplier_key()
 
@@ -18,6 +19,7 @@ def controlled_exit(p_message):
     #Log fatal error, send email, and exit
     log_error(p_message)
     log_shutdown()
+    health.record_event('db_error', p_message)
     email('Matrix Auto (DB Error) for ' + get_customer_name())
     rename_log()
     exit()
@@ -74,7 +76,9 @@ def get_items(l_cursor):
 
 
 def get_orders(l_cursor):
-    #Fetch all pending orders not yet sent to ERP
+    #Fetch all pending orders not yet sent to ERP, excluding any currently
+    #marked in-flight in erp_send_state (crash/duplicate-submission guard --
+    #see mark_inflight/clear_inflight/get_stale_inflight below)
     try:
         l_cursor.execute(
             'select distinct po_key, po_code '
@@ -82,7 +86,8 @@ def get_orders(l_cursor):
             'where po_key in (select po_key from dbo.ent_po_details) '
             'and send_erp = 0 '
             'and supplier_key = ' + str(SUPPLIER_KEY) + ' '
-            'and bool_bitul = 0'
+            'and bool_bitul = 0 '
+            'and po_key not in (select po_key from dbo.erp_send_state)'
         )
     except Error as e:
         controlled_exit('FATAL: ' + str(e))
@@ -134,3 +139,44 @@ def update_order(l_cursor, l_key):
         log_info('updated ent_po_headers: po_key = ' + str(l_key) + ' - updated send_erp from 0 to 1')
     except Error as e:
         controlled_exit('FATAL: ' + str(e))
+
+
+def mark_inflight(l_cursor, l_key):
+    #Record that a PO submission to P21 is starting, before calling the API.
+    #If the script crashes or loses connection mid-submission, this row stays
+    #and blocks automatic resubmission next run (see get_orders) until a
+    #human resolves it via get_stale_inflight.
+    try:
+        l_cursor.execute(
+            "insert into dbo.erp_send_state (po_key, status, updated_at) values (?, 'inflight', GETDATE())",
+            l_key
+        )
+    except Error as e:
+        controlled_exit('FATAL: ' + str(e))
+
+
+def clear_inflight(l_cursor, l_key):
+    #Remove the in-flight guard once a submission's outcome is definitely
+    #known (success, partial, or an explicit 'error' response from P21).
+    #Only leave a row behind when the outcome is genuinely unknown (an
+    #exception during submission) -- see orders() in main.py.
+    try:
+        l_cursor.execute('delete from dbo.erp_send_state where po_key = ?', l_key)
+    except Error as e:
+        controlled_exit('FATAL: ' + str(e))
+
+
+def get_stale_inflight(l_cursor):
+    #Flag orders that have been marked in-flight for over an hour -- almost
+    #certainly a crash or lost connection mid-submission that needs a human
+    #to check P21 and manually resolve (clear the row, or set send_erp = 1
+    #if it turns out the order did go through)
+    try:
+        l_cursor.execute(
+            "select po_key from dbo.erp_send_state "
+            "where status = 'inflight' "
+            "and updated_at < DATEADD(hour, -1, GETDATE())"
+        )
+    except Error as e:
+        controlled_exit('FATAL: ' + str(e))
+    return l_cursor.fetchall()

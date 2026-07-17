@@ -12,9 +12,9 @@ from email.mime.application import MIMEApplication
 from log import l_log_location
 from datetime import datetime
 from config import get_email_to, get_email_cc, get_contract_id
+import credentials
 
 SMTP_FROM = 'afireports@afi-tools.com'
-SMTP_PASSWORD = 'Sog36064'
 
 
 def check_order(p_dict, p_item_list):
@@ -105,8 +105,8 @@ def email(p_subject, p_message="", p_log=True, p_attach=True):
         msg.attach(MIMEText(p_message or ''))
 
     context = create_default_context()
-    s = SMTP('smtp.office365.com', 587)
+    s = SMTP('smtp.sendgrid.net', 587)
     s.starttls(context=context)
-    s.login(SMTP_FROM, SMTP_PASSWORD)
+    s.login('apikey', credentials.get_sendgrid_api_key())
     s.sendmail(SMTP_FROM, l_all_recip, msg.as_string())
     s.quit()

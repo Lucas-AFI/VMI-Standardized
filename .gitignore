@@ -4,6 +4,10 @@ config.ini
 *.env
 .env
 
+# Health reporter local state (machine-specific, ephemeral)
+health_state.db
+logs/health_reporter.log
+
 # Logs
 logs/
 

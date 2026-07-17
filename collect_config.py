@@ -101,12 +101,20 @@ def collect():
     email_to = prompt('Email To', 'VMI@afi-tools.com')
     email_cc = prompt('Email CC (optional, press Enter to skip)', '')
 
+    # Health Reporter
+    print()
+    print('--- Health Reporter ---')
+    health_client_name = prompt('Health Dashboard Client Name (e.g. "American Torch Tip")')
+    health_endpoint_url = prompt('Health Dashboard Endpoint URL')
+
     # Validate required fields
     missing = []
     if not sql_server: missing.append('SQL Server Name')
     if not sql_db: missing.append('SQL Database Name')
     if not customer_id: missing.append('P21 Customer ID')
     if not email_to: missing.append('Email To')
+    if not health_client_name: missing.append('Health Dashboard Client Name')
+    if not health_endpoint_url: missing.append('Health Dashboard Endpoint URL')
 
     if missing:
         print()
@@ -138,6 +146,11 @@ def collect():
         'email_cc': email_cc,
     }
 
+    config['health'] = {
+        'client_name': health_client_name,
+        'endpoint_url': health_endpoint_url,
+    }
+
     with open(CONFIG_PATH, 'w') as f:
         config.write(f)
 
@@ -153,10 +166,14 @@ def collect():
     base_url = prompt('P21 API Base URL')
     api_username = prompt('P21 API Username')
     api_password = prompt('P21 API Password', secret=True)
+    health_reporter_secret = prompt('Health Reporter Shared Secret', secret=True)
+    sendgrid_api_key = prompt('SendGrid API Key', secret=True)
 
     keyring.set_password(SERVICE_NAME, 'P21_BASE_URL', base_url)
     keyring.set_password(SERVICE_NAME, 'P21_API_USERNAME', api_username)
     keyring.set_password(SERVICE_NAME, 'P21_API_PASSWORD', api_password)
+    keyring.set_password(SERVICE_NAME, 'HEALTH_REPORTER_SECRET', health_reporter_secret)
+    keyring.set_password(SERVICE_NAME, 'SENDGRID_API_KEY', sendgrid_api_key)
 
     print()
     print('API credentials stored in Windows Credential Manager.')
@@ -175,7 +192,9 @@ def collect():
     print(f'  PO Prefix      : {po_prefix or "(not set)"}')
     print(f'  Email To       : {email_to}')
     print(f'  Email CC       : {email_cc or "(not set)"}')
-    print(f'  API Credentials: stored in Credential Manager')
+    print(f'  Health Client  : {health_client_name}')
+    print(f'  Health Endpoint: {health_endpoint_url}')
+    print(f'  API/SMTP Creds : stored in Credential Manager')
     print()
     print('You can verify credentials anytime with: python collect_config.py --verify')
     print('You can edit config.ini directly at: ' + CONFIG_PATH)
@@ -187,11 +206,15 @@ def verify():
     base_url = keyring.get_password(SERVICE_NAME, 'P21_BASE_URL')
     username = keyring.get_password(SERVICE_NAME, 'P21_API_USERNAME')
     password = keyring.get_password(SERVICE_NAME, 'P21_API_PASSWORD')
+    health_secret = keyring.get_password(SERVICE_NAME, 'HEALTH_REPORTER_SECRET')
+    sendgrid_key = keyring.get_password(SERVICE_NAME, 'SENDGRID_API_KEY')
 
-    if base_url and username and password:
-        print('P21_BASE_URL     : ' + base_url)
-        print('P21_API_USERNAME : ' + username)
-        print('P21_API_PASSWORD : ' + '*' * len(password))
+    if base_url and username and password and health_secret and sendgrid_key:
+        print('P21_BASE_URL           : ' + base_url)
+        print('P21_API_USERNAME       : ' + username)
+        print('P21_API_PASSWORD       : ' + '*' * len(password))
+        print('HEALTH_REPORTER_SECRET : ' + '*' * len(health_secret))
+        print('SENDGRID_API_KEY       : ' + '*' * len(sendgrid_key))
         print()
         print('All credentials found.')
     else:
@@ -199,6 +222,8 @@ def verify():
         if not base_url: missing.append('P21_BASE_URL')
         if not username: missing.append('P21_API_USERNAME')
         if not password: missing.append('P21_API_PASSWORD')
+        if not health_secret: missing.append('HEALTH_REPORTER_SECRET')
+        if not sendgrid_key: missing.append('SENDGRID_API_KEY')
         print('Missing credentials: ' + ', '.join(missing))
         print('Please re-run collect_config.py to store them.')
 

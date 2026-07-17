@@ -31,3 +31,11 @@ def get_api_username():
 
 def get_api_password():
     return _get('P21_API_PASSWORD')
+
+
+def get_health_reporter_secret():
+    return _get('HEALTH_REPORTER_SECRET')
+
+
+def get_sendgrid_api_key():
+    return _get('SENDGRID_API_KEY')

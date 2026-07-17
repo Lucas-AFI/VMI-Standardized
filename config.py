@@ -68,3 +68,12 @@ def get_email_to():
 def get_email_cc():
     raw = _get('email', 'email_cc', fallback='')
     return [addr.strip() for addr in raw.split(',') if addr.strip()]
+
+
+# Health reporter
+
+def get_health_client_name():
+    return _get('health', 'client_name', required=True)
+
+def get_health_endpoint_url():
+    return _get('health', 'endpoint_url', required=True)
