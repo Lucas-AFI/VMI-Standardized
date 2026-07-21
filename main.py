@@ -10,10 +10,11 @@ Usage:
 
 from argparse import ArgumentParser
 from sys import exit
+import traceback
 from log import configure_logs, log_debug, log_info, log_error, start_log, stop_log, log_shutdown, set_level
-from utils import coalesce, email, rename_log, check_order, get_contract
+from utils import coalesce, email, rename_log, check_order, get_contract, classify_dropped_item
 from db import connect_db, close_db_conn, get_items, update_item, get_orders, get_order_items, update_order, mark_inflight, clear_inflight, get_stale_inflight
-from api import get_item, get_customer_name, create_order, approve_order
+from api import get_item, get_customer_name, create_order, approve_order, check_item_availability
 from xml_processor import build_order, add_line_item, print_xml
 import health
 
@@ -59,6 +60,7 @@ def items():
         email('Matrix Auto Price Changes for ' + get_customer_name())
         rename_log()
     except Exception:
+        health.record_event('run_failure', traceback.format_exc()[:2000])
         health.record_run('items', 'error', l_succ_cnt, l_tot_cnt)
         raise
 
@@ -112,7 +114,7 @@ def orders(p_quote=None):
 
             try:
                 l_order_resp = create_order(l_xml)
-                l_status, l_response, l_message = check_order(l_order_resp, l_item_ids)
+                l_status, l_response, l_message, l_dropped_item_ids = check_order(l_order_resp, l_item_ids)
 
                 if l_status == 'error':
                     log_error('Submitting order to API failed: order not created. Reason: ' + l_response + '. po_code = ' + str(l_order.po_code or ''))
@@ -124,9 +126,21 @@ def orders(p_quote=None):
                     l_order_no = l_response
                     update_order(l_cursor, l_order.po_key)
                     log_info('Order created with skipped items: P21 OrderNo = ' + l_order_no + ' and po_code = ' + str(l_order.po_code))
-                    log_error('Items skipped in order ' + l_order_no + ':\n' + l_message)
-                    email('Matrix Auto Order Item Exception(s) for ' + get_customer_name(), l_message, False)
-                    health.record_event('partial_order', l_message, str(l_order.po_code or ''))
+
+                    # Diagnostic-only: check why the dropped item(s) were unavailable
+                    # (stock-out vs. a likely SKU mapping issue), batched into one
+                    # P21 call per order. Purely additive -- never blocks or crashes
+                    # the partial-order handling above, which already worked before this.
+                    l_availability = check_item_availability(l_dropped_item_ids)
+                    l_cause_lines = [
+                        'ItemId: ' + l_dropped_id + ' - Probable cause: ' + classify_dropped_item(l_availability.get(l_dropped_id))
+                        for l_dropped_id in l_dropped_item_ids
+                    ]
+                    l_message_with_cause = l_message + ('\n' + '\n'.join(l_cause_lines) + '\n' if l_cause_lines else '')
+
+                    log_error('Items skipped in order ' + l_order_no + ':\n' + l_message_with_cause)
+                    email('Matrix Auto Order Item Exception(s) for ' + get_customer_name(), l_message_with_cause, False)
+                    health.record_event('partial_order', l_message_with_cause, str(l_order.po_code or ''))
                     clear_inflight(l_cursor, l_order.po_key)
                     l_succ_cnt += 1
 
@@ -153,6 +167,7 @@ def orders(p_quote=None):
         email('Matrix Auto Order Submission for ' + get_customer_name())
         rename_log()
     except Exception:
+        health.record_event('run_failure', traceback.format_exc()[:2000])
         health.record_run('orders', 'error', l_succ_cnt, l_tot_cnt)
         raise
 

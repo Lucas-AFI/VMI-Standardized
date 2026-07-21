@@ -61,6 +61,13 @@ def record_event(p_event_type, p_detail=None, p_po_code=None):
         'partial_order'  - check_order() returned 'partial' (items silently dropped)
         'db_error'       - controlled_exit() was triggered (DB/connection failure)
         'api_error'      - unhandled exception calling P21 API
+        'run_failure'    - items()/orders() crashed somewhere not covered by
+                            the four types above; p_detail is the traceback
+                            (see main.py's outer except Exception blocks).
+                            record_run() alone only tracks the latest
+                            pass/fail flag and gets silently overwritten by
+                            the next successful run -- this is what leaves a
+                            durable, dashboard-visible trace of what broke.
     p_detail: free-text detail/summary (e.g. the check_order() message)
     p_po_code: related PO code, if applicable
     """

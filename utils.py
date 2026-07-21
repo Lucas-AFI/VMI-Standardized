@@ -20,37 +20,65 @@ SMTP_FROM = 'afireports@afi-tools.com'
 def check_order(p_dict, p_item_list):
     """
     Validate P21 order response and determine status.
-    Returns: (status, order_no_or_reason, message)
+    Returns: (status, order_no_or_reason, message, dropped_item_ids)
       - 'success' : all items accepted
       - 'partial' : order created but some items were dropped (Delete=Y)
       - 'error'   : order was not created
+    dropped_item_ids is always a list; only non-empty when status == 'partial'.
     """
     if 'ResourceError' in p_dict:
         l_error_message = str(p_dict['ResourceError'].get('ErrorMessage', 'Unknown Error'))
         if 'This item ID is not valid' in l_error_message:
             l_err_message = 'One or more item IDs are not valid: ' + ','.join(p_item_list)
-            return 'error', l_err_message, l_err_message
+            return 'error', l_err_message, l_err_message, []
         else:
             l_full_error = 'Unknown Error: ' + l_error_message + ' Items: ' + ','.join(p_item_list)
-            return 'error', l_full_error, l_full_error
+            return 'error', l_full_error, l_full_error, []
 
     l_items = p_dict['Order']['Lines']['OrderLine']
     l_message = ""
+    l_dropped_ids = []
 
     if type(l_items) is dict:
         if l_items['Delete'] == 'Y':
             l_message = 'OrderNo: ' + p_dict['Order']['OrderNo'] + '\nItemId: ' + l_items['ItemId'] + ' is not available to purchase\n'
+            l_dropped_ids = [l_items['ItemId']]
     else:
         if any(d['Delete'] == 'Y' for d in l_items):
             l_message = 'OrderNo: ' + p_dict['Order']['OrderNo'] + '\n'
             for item in l_items:
                 if item['Delete'] == 'Y':
                     l_message += 'ItemId: ' + item['ItemId'] + ' is not available to purchase\n'
+                    l_dropped_ids.append(item['ItemId'])
 
     if l_message == "":
-        return 'success', p_dict['Order']['OrderNo'], l_message
+        return 'success', p_dict['Order']['OrderNo'], l_message, l_dropped_ids
     else:
-        return 'partial', p_dict['Order']['OrderNo'], l_message
+        return 'partial', p_dict['Order']['OrderNo'], l_message, l_dropped_ids
+
+
+def classify_dropped_item(p_availability):
+    """
+    Classify the probable cause of a dropped order item, given P21's
+    itemsAvailability response for it (see api.check_item_availability()).
+
+    p_availability: the dict for one ItemId from check_item_availability()'s
+    result, or None if that item was missing from the response (including
+    if the availability call itself failed - check_item_availability()
+    returns {} in that case, so every lookup misses and every item is
+    tagged 'unknown' rather than guessing).
+
+    QuantityAvailable is used, not QuantityOnHand - it already nets out
+    what's allocated/frozen/quarantined, so it reflects what's actually
+    sellable right now. Stock could physically exist but be fully spoken for.
+    """
+    if not p_availability:
+        return 'unknown'
+    try:
+        l_qty_available = float(p_availability.get('QuantityAvailable', 0) or 0)
+    except (TypeError, ValueError):
+        return 'unknown'
+    return 'stock_out' if l_qty_available <= 0 else 'possible_mapping_issue'
 
 
 def coalesce(p_value):

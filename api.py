@@ -10,6 +10,7 @@ import xmltodict
 from xml_processor import tostring
 from credentials import get_base_url, get_api_username, get_api_password
 from config import get_customer_id, get_location_id
+from log import log_error
 
 l_base_url = get_base_url()
 
@@ -104,6 +105,51 @@ def create_order(p_xml):
     except xmltodict.expat.ExpatError:
         l_dict = {'ResourceError': 'No Api Records'}
     return l_dict
+
+
+def check_item_availability(p_item_ids):
+    """
+    Query P21 stock availability for one or more item IDs in a single batched
+    call (used to diagnose why a partial order dropped specific items - see
+    orders() in main.py). Returns a dict keyed by ItemId, each value the raw
+    availability fields P21 returned for it (QuantityAvailable, QuantityOnHand,
+    etc). An ItemId absent from the result means P21's response didn't
+    include it - this function never raises, so a network/parse failure
+    surfaces the same way, as a missing key, rather than crashing the
+    partial-order handling that already works.
+    """
+    if not p_item_ids:
+        return {}
+
+    l_loc = get_location_id()
+    l_items_xml = ''.join(
+        '<ItemAvailabilityInfo><ItemId>' + i + '</ItemId></ItemAvailabilityInfo>'
+        for i in p_item_ids
+    )
+    l_xml = '<ArrayOfItemAvailabilityInfo>' + l_items_xml + '</ArrayOfItemAvailabilityInfo>'
+    l_headers = {"Authorization": "Bearer " + l_token, "Content-Type": "application/xml"}
+    l_endpoint = (
+        l_base_url +
+        '/inventory/parts/itemsAvailability?locationId=' + l_loc +
+        '&companyId=AFI'
+    )
+
+    try:
+        l_response = requests.post(l_endpoint, headers=l_headers, data=l_xml).text
+        l_dict = xmltodict.parse(l_response)
+    except Exception as e:
+        log_error('Item availability check failed (network/parse error): ' + str(e))
+        return {}
+
+    if 'ResourceError' in l_dict:
+        log_error('Item availability check returned ResourceError: ' + str(l_dict['ResourceError']))
+        return {}
+
+    l_info = (l_dict.get('ArrayOfItemAvailabilityInfo') or {}).get('ItemAvailabilityInfo') or []
+    if isinstance(l_info, dict):
+        l_info = [l_info]
+
+    return {i['ItemId']: i for i in l_info if isinstance(i, dict) and 'ItemId' in i}
 
 
 def approve_order(p_orderno):
