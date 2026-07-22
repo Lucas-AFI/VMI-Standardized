@@ -88,6 +88,13 @@ def orders(p_quote=None):
                 'the erp_send_state row (if not actually sent) or set send_erp = 1 (if sent) as appropriate.',
                 False
             )
+            for l_stale_row in l_stale:
+                if not health.event_already_recorded('stale_inflight_order', str(l_stale_row.po_key)):
+                    health.record_event(
+                        'stale_inflight_order',
+                        'Orders stuck in-flight for over 1 hour (possible crash mid-submission): ' + str(l_stale_row.po_key),
+                        str(l_stale_row.po_key)
+                    )
 
         l_orders = get_orders(l_cursor)
 

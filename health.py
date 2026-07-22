@@ -87,6 +87,27 @@ def record_event(p_event_type, p_detail=None, p_po_code=None):
         pass
 
 
+def event_already_recorded(p_event_type, p_po_code):
+    """
+    True if an event of this type/PO combination has ever been recorded
+    locally, regardless of whether it has since been reported to the
+    dashboard -- used for event types that should be recorded once per PO
+    rather than every cycle it remains true (e.g. 'stale_inflight_order' in
+    main.py's orders(), which would otherwise get a fresh row every run
+    while a PO stays stuck).
+    """
+    try:
+        l_conn = _connect()
+        l_row = l_conn.execute(
+            'SELECT 1 FROM events WHERE event_type = ? AND po_code = ? LIMIT 1',
+            (p_event_type, p_po_code)
+        ).fetchone()
+        l_conn.close()
+        return l_row is not None
+    except Exception:
+        return False
+
+
 def record_run(p_run_type, p_status, p_succ_cnt=None, p_tot_cnt=None):
     """
     Record that a run of 'items' or 'orders' completed, and how it went.
