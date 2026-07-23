@@ -40,24 +40,34 @@ def download_item_image(p_item_code):
       'ok'      - downloaded and written successfully
       'missing' - host returned 404 (no image for this item -- routine, not
                   an error; not every item necessarily has a photo yet)
-      'error'   - network failure or any other non-200/404 response
+      'error'   - network failure, an unexpected HTTP response, or a local
+                  file-write failure (e.g. permissions) -- logs the specific
+                  reason itself, since a single item's failure must not take
+                  down the whole run (see sync_images() below).
     """
     l_image_url = get_image_base_url() + '/' + p_item_code + '.jpg'
     l_target_path = os.path.join(get_local_image_folder(), p_item_code + '.jpg')
 
     try:
         l_response = requests.get(l_image_url, timeout=10)
-    except Exception:
+    except Exception as e:
+        log_error('Image download failed for ' + p_item_code + ': ' + str(e))
         return 'error'
 
-    if l_response.status_code == 200:
+    if l_response.status_code == 404:
+        return 'missing'
+    elif l_response.status_code != 200:
+        log_error('Image host returned HTTP ' + str(l_response.status_code) + ' for ' + p_item_code)
+        return 'error'
+
+    try:
         with open(l_target_path, 'wb') as f:
             f.write(l_response.content)
-        return 'ok'
-    elif l_response.status_code == 404:
-        return 'missing'
-    else:
+    except OSError as e:
+        log_error('Failed to write image for ' + p_item_code + ' to ' + l_target_path + ': ' + str(e))
         return 'error'
+
+    return 'ok'
 
 
 def sync_images():
@@ -86,7 +96,7 @@ def sync_images():
             elif l_result == 'missing':
                 log_debug('No image found for: ' + row.item_code)
             else:
-                log_error('Failed to download image for: ' + row.item_code)
+                # download_item_image() already logged the specific reason
                 l_err_cnt += 1
 
         stop_log('Image sync process', l_succ_cnt, l_tot_cnt)
