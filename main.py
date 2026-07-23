@@ -23,6 +23,7 @@ def items():
     # Sync item prices from P21 API to local Matrix database
     l_tot_cnt = 0
     l_succ_cnt = 0
+    l_err_cnt = 0
 
     start_log('Update process')
 
@@ -38,6 +39,7 @@ def items():
 
             if 'ResourceError' in l_item.keys():
                 log_error('Item not found in API: ' + row.item_code)
+                l_err_cnt += 1
             else:
                 l_new_price = '{:.4f}'.format(float(l_item['ItemPrice']['UnitPrice']))
                 l_old_price = coalesce(row.item_price)
@@ -55,13 +57,13 @@ def items():
         close_db_conn(l_db_conn)
         stop_log('Update process', l_succ_cnt, l_tot_cnt)
 
-        health.record_run('items', 'success', l_succ_cnt, l_tot_cnt)
+        health.record_run('items', 'success', l_succ_cnt, l_tot_cnt, l_err_cnt)
 
         email('Matrix Auto Price Changes for ' + get_customer_name())
         rename_log()
     except Exception:
         health.record_event('run_failure', traceback.format_exc()[:2000])
-        health.record_run('items', 'error', l_succ_cnt, l_tot_cnt)
+        health.record_run('items', 'error', l_succ_cnt, l_tot_cnt, l_err_cnt)
         raise
 
 

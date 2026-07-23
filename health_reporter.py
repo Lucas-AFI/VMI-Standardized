@@ -77,11 +77,18 @@ def get_run_log():
     l_conn = sqlite3.connect(l_health_db, timeout=10)
     l_conn.execute(
         'CREATE TABLE IF NOT EXISTS run_log (run_type TEXT PRIMARY KEY, last_run_at TEXT, '
-        'last_status TEXT, succ_cnt INTEGER, tot_cnt INTEGER)'
+        'last_status TEXT, succ_cnt INTEGER, tot_cnt INTEGER, err_cnt INTEGER)'
     )
-    l_rows = l_conn.execute('SELECT run_type, last_run_at, last_status, succ_cnt, tot_cnt FROM run_log').fetchall()
+    try:
+        # Same pre-existing-database patch as health.py's _connect() -- this
+        # script deliberately keeps its own schema handling rather than
+        # importing from health.py (see module docstring).
+        l_conn.execute('ALTER TABLE run_log ADD COLUMN err_cnt INTEGER')
+    except sqlite3.OperationalError:
+        pass
+    l_rows = l_conn.execute('SELECT run_type, last_run_at, last_status, succ_cnt, tot_cnt, err_cnt FROM run_log').fetchall()
     l_conn.close()
-    return {r[0]: {'last_run_at': r[1], 'last_status': r[2], 'succ_cnt': r[3], 'tot_cnt': r[4]} for r in l_rows}
+    return {r[0]: {'last_run_at': r[1], 'last_status': r[2], 'succ_cnt': r[3], 'tot_cnt': r[4], 'err_cnt': r[5]} for r in l_rows}
 
 
 def get_stale_pending_orders():

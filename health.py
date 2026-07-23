@@ -41,10 +41,19 @@ def _connect():
             last_run_at TEXT NOT NULL,
             last_status TEXT NOT NULL,
             succ_cnt INTEGER,
-            tot_cnt INTEGER
+            tot_cnt INTEGER,
+            err_cnt INTEGER
         )
         """
     )
+    try:
+        # health_state.db already exists on ~150 client machines from before
+        # err_cnt was added -- CREATE TABLE IF NOT EXISTS above won't alter an
+        # existing table, so patch it in here. Fails harmlessly (caught below)
+        # once the column is already present.
+        l_conn.execute('ALTER TABLE run_log ADD COLUMN err_cnt INTEGER')
+    except sqlite3.OperationalError:
+        pass
     return l_conn
 
 
@@ -108,20 +117,24 @@ def event_already_recorded(p_event_type, p_po_code):
         return False
 
 
-def record_run(p_run_type, p_status, p_succ_cnt=None, p_tot_cnt=None):
+def record_run(p_run_type, p_status, p_succ_cnt=None, p_tot_cnt=None, p_err_cnt=None):
     """
     Record that a run of 'items' or 'orders' completed, and how it went.
     p_status: 'success' or 'error'
+    p_err_cnt: count of rows that errored without stopping the run (e.g.
+               items() SKUs P21 returned a ResourceError for) -- distinct
+               from p_succ_cnt/p_tot_cnt, which track updates applied vs.
+               rows considered.
     """
     try:
         l_conn = _connect()
         l_conn.execute(
-            'INSERT INTO run_log (run_type, last_run_at, last_status, succ_cnt, tot_cnt) '
-            'VALUES (?, ?, ?, ?, ?) '
+            'INSERT INTO run_log (run_type, last_run_at, last_status, succ_cnt, tot_cnt, err_cnt) '
+            'VALUES (?, ?, ?, ?, ?, ?) '
             'ON CONFLICT(run_type) DO UPDATE SET '
             'last_run_at=excluded.last_run_at, last_status=excluded.last_status, '
-            'succ_cnt=excluded.succ_cnt, tot_cnt=excluded.tot_cnt',
-            (p_run_type, _now(), p_status, p_succ_cnt, p_tot_cnt)
+            'succ_cnt=excluded.succ_cnt, tot_cnt=excluded.tot_cnt, err_cnt=excluded.err_cnt',
+            (p_run_type, _now(), p_status, p_succ_cnt, p_tot_cnt, p_err_cnt)
         )
         l_conn.commit()
         l_conn.close()
