@@ -75,6 +75,22 @@ def get_items(l_cursor):
     return l_cursor.fetchall()
 
 
+def get_item_codes(l_cursor):
+    #Fetch active item codes linked to AFI supplier, for image sync
+    try:
+        l_cursor.execute(
+            'select m.item_code '
+            'from dbo.ent_item_master m, dbo.ent_item_suppliers s '
+            'where m.item_key = s.item_key '
+            'and s.supplier_key = ' + str(SUPPLIER_KEY) + ' '
+            'and s.bool_bitul = 0 '
+            'and m.bool_bitul = 0'
+        )
+    except Error as e:
+        controlled_exit('FATAL: ' + str(e))
+    return l_cursor.fetchall()
+
+
 def get_orders(l_cursor):
     #Fetch all pending orders not yet sent to ERP, excluding any currently
     #marked in-flight in erp_send_state (crash/duplicate-submission guard --

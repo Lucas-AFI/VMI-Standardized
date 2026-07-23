@@ -70,6 +70,15 @@ def get_email_cc():
     return [addr.strip() for addr in raw.split(',') if addr.strip()]
 
 
+# Images
+
+def get_image_base_url():
+    return _get('images', 'base_url', required=True)
+
+def get_local_image_folder():
+    return _get('images', 'local_folder', fallback=r'C:\Program Files (x86)\MATRIX-TM\Images\ItemPictures')
+
+
 # Health reporter
 
 def get_health_client_name():

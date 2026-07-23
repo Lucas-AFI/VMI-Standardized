@@ -5,6 +5,7 @@ Usage:
     python main.py                  # Price sync (default)
     python main.py -a orders        # Auto order submission
     python main.py -a orders -q     # Submit as quotes
+    python main.py -a images        # Item image sync
     python main.py -l debug         # Enable debug logging
 """
 
@@ -16,6 +17,7 @@ from utils import coalesce, email, rename_log, check_order, get_contract, classi
 from db import connect_db, close_db_conn, get_items, update_item, get_orders, get_order_items, update_order, mark_inflight, clear_inflight, get_stale_inflight
 from api import get_item, get_customer_name, create_order, approve_order, check_item_availability
 from xml_processor import build_order, add_line_item, print_xml
+from images import sync_images
 import health
 
 
@@ -185,7 +187,7 @@ def orders(p_quote=None):
 def main():
     configure_logs()
     parser = ArgumentParser(description='VMI Update Process')
-    actions = ['items', 'orders']
+    actions = ['items', 'orders', 'images']
     levels = ['debug', 'info', 'warn', 'error']
     parser.add_argument('-a', choices=actions, default='items', dest='action')
     parser.add_argument('-l', choices=levels, default='info', dest='level')
@@ -196,6 +198,8 @@ def main():
 
     if args.action.lower() == 'orders':
         orders(args.quote)
+    elif args.action.lower() == 'images':
+        sync_images()
     elif args.action.lower() == 'items':
         items()
 

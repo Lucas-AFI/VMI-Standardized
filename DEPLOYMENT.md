@@ -83,6 +83,12 @@ It will prompt for:
 | Email To | `[email] email_to` | Comma-separated. Default `VMI@afi-tools.com` |
 | Email CC | `[email] email_cc` | Optional, comma-separated |
 
+**Item Images** (only required if this machine will run Item Image Sync)
+| Field | config.ini key | Notes |
+|---|---|---|
+| Image Host Base URL | `[images] base_url` | e.g. `https://s3.us-west-2.amazonaws.com/catsy.1102` — a public, unauthenticated host; `<item_code>.jpg` gets appended per item |
+| Local Image Folder | `[images] local_folder` | Default `C:\Program Files (x86)\MATRIX-TM\Images\ItemPictures` |
+
 **Health Reporter**
 | Field | config.ini key | Notes |
 |---|---|---|
@@ -126,24 +132,29 @@ python setup_credentials.py --verify
 ```
 python main.py -l debug              # price sync, verbose logging
 python main.py -a orders -l debug    # order submission, verbose logging
+python matrix_image_save.py          # item image sync (only if [images] is configured) -- this is
+                                      # what's actually scheduled on machines; `main.py -a images`
+                                      # is the equivalent, useful for -l debug verbosity
 ```
 
 - Check `logs/app.log` for errors.
 - Confirm the email notification actually arrives (via SendGrid).
+- If testing image sync, confirm `.jpg` files actually landed in the configured `local_folder`.
 - Manually run `python health_reporter.py`, then check
   `logs/health_reporter.log` and confirm this client shows up at the
   dashboard's `/health/dashboard` page.
 
 ## 6. Configure Task Scheduler
 
-Four scheduled tasks total. All run the same Python interpreter used above,
-with **Start in** set to `C:\update_process`:
+Five scheduled tasks total (four if this machine isn't running Item Image Sync). All run the same
+Python interpreter used above, with **Start in** set to `C:\update_process`:
 
 | Task | Command | Frequency | Notes |
 |---|---|---|---|
 | VMI Price Sync | `python main.py` | *(match the interval already used on other client machines — not fixed anywhere in this repo; confirm against a reference machine)* | |
 | VMI Auto Orders | `python main.py -a orders` | *(runs within a bounded window per day on existing machines — confirm the exact interval the same way)* | |
-| VMI Health Reporter | `python health_reporter.py` | Every 15 minutes, indefinitely | **Own, independent** Task Scheduler entry — must keep running even if the two tasks above hang or crash. Run whether user is logged on or not: **Yes** |
+| VMI Item Image Sync | `python matrix_image_save.py` (no arguments) | *(images change rarely — daily is a reasonable default; confirm against a reference machine if one exists)* | Optional — only add if `[images]` is configured in `config.ini`. This matches the pre-existing Task Scheduler convention already used across the client fleet (Program: `python`, Arguments: `matrix_image_save.py`) — use it for every machine, new or existing, so the config stays identical everywhere. `main.py -a images` is equivalent if you'd rather match the other two actions' CLI. |
+| VMI Health Reporter | `python health_reporter.py` | Every 15 minutes, indefinitely | **Own, independent** Task Scheduler entry — must keep running even if the tasks above hang or crash. Run whether user is logged on or not: **Yes** |
 | VMI Script Updates | `update_scripts.bat` | Monthly | Pulls the latest code via `git pull` |
 Steps for this one: 
   1. Create Basic Task
@@ -158,9 +169,10 @@ Steps for this one:
 
 - [ ] `erp_send_state` exists on this machine's database and matches `sql/erp_send_state.sql`
 - [ ] `config.ini` fully filled in; `collect_config.py --verify` passes
-- [ ] Manual run of both `main.py` actions succeeded and the email notification arrived
+- [ ] Manual run of both `main.py` order/price actions succeeded and the email notification arrived
+- [ ] If running Item Image Sync: manual `matrix_image_save.py` run succeeded and `.jpg` files landed in `local_folder`
 - [ ] Manual run of `health_reporter.py` succeeded and this client is visible on the dashboard
-- [ ] All four Task Scheduler entries are created, pointed at `C:\update_process`, and `health_reporter.py`'s is set to run whether logged on or not
+- [ ] All Task Scheduler entries (four, or five with Item Image Sync) are created, pointed at `C:\update_process`, and `health_reporter.py`'s is set to run whether logged on or not
 - [ ] `logs/` is being written to and rotated correctly (see `rename_log()` in `utils.py`)
 
 ---

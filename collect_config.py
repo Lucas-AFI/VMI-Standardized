@@ -101,6 +101,12 @@ def collect():
     email_to = prompt('Email To', 'VMI@afi-tools.com')
     email_cc = prompt('Email CC (optional, press Enter to skip)', '')
 
+    # Images
+    print()
+    print('--- Item Images ---')
+    image_base_url = prompt('Image Host Base URL (e.g. "https://s3.us-west-2.amazonaws.com/catsy.1102")')
+    local_image_folder = prompt('Local Image Folder', r'C:\Program Files (x86)\MATRIX-TM\Images\ItemPictures')
+
     # Health Reporter
     print()
     print('--- Health Reporter ---')
@@ -113,6 +119,7 @@ def collect():
     if not sql_db: missing.append('SQL Database Name')
     if not customer_id: missing.append('P21 Customer ID')
     if not email_to: missing.append('Email To')
+    if not image_base_url: missing.append('Image Host Base URL')
     if not health_client_name: missing.append('Health Dashboard Client Name')
     if not health_endpoint_url: missing.append('Health Dashboard Endpoint URL')
 
@@ -144,6 +151,11 @@ def collect():
     config['email'] = {
         'email_to': email_to,
         'email_cc': email_cc,
+    }
+
+    config['images'] = {
+        'base_url': image_base_url,
+        'local_folder': local_image_folder,
     }
 
     config['health'] = {
@@ -192,6 +204,8 @@ def collect():
     print(f'  PO Prefix      : {po_prefix or "(not set)"}')
     print(f'  Email To       : {email_to}')
     print(f'  Email CC       : {email_cc or "(not set)"}')
+    print(f'  Image Base URL : {image_base_url}')
+    print(f'  Image Folder   : {local_image_folder}')
     print(f'  Health Client  : {health_client_name}')
     print(f'  Health Endpoint: {health_endpoint_url}')
     print(f'  API/SMTP Creds : stored in Credential Manager')

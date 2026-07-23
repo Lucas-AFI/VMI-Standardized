@@ -1,10 +1,11 @@
 # VMI Update Process
 
 Standardized scripts for AFI Matrix VMI vending cabinet client machines.
-Each machine runs three scheduled tasks:
+Each machine runs four scheduled tasks:
 
 - **Price Sync** — syncs item prices from P21 to the local Matrix database
 - **Auto Orders** — submits pending Matrix purchase orders to P21
+- **Item Image Sync** — downloads item images into the local MATRIX image folder
 - **Health Reporter** — reports machine/run health to the central dashboard every 15 minutes (runs independently, see below)
 
 ---
@@ -21,6 +22,8 @@ VMI-Standardized/
 ├── log.py                  # Logging configuration
 ├── credentials.py          # Credential decryption (do not modify)
 ├── setup_credentials.py    # One-time credential setup per machine (run as admin)
+├── images.py                # Item image sync logic (S3/Catsy-style host -> local MATRIX image folder)
+├── matrix_image_save.py     # Thin Task Scheduler entry point for images.py -- see Item Image Sync below
 ├── health.py                # Local health event queue, written to by main.py/db.py
 ├── health_reporter.py       # Standalone script, own scheduled task, posts health to the central dashboard
 ├── sql/
@@ -45,8 +48,9 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for the full step-by-step guide. The short ve
    Server database — required before `main.py -a orders` will run at all (see Duplicate-Order Guard
    below)
 5. Run `setup_credentials.py` once to store API, SendGrid, and health reporter credentials securely
-6. Fill in the `[health]` section of `config.ini` (`client_name`, `endpoint_url`)
-7. Test manually, then configure scheduled tasks — including a **third, independent** Task Scheduler
+6. Fill in the `[images]` section of `config.ini` (`base_url`, `local_folder`) if this machine will
+   run Item Image Sync, and the `[health]` section (`client_name`, `endpoint_url`)
+7. Test manually, then configure scheduled tasks — including a **fourth, independent** Task Scheduler
    entry for `health_reporter.py` (every 15 minutes, runs whether user is logged on or not)
 
 ---
@@ -74,6 +78,42 @@ assume the pieces below are already in place, and will fail (loudly, via `contro
    doesn't already have one (every 15 minutes, runs whether user is logged on or not).
 5. Only then pull the updated repo, and test both `main.py` actions manually before trusting the
    scheduled tasks with it.
+
+Item Image Sync is **not** part of the above — it's a new, optional action that doesn't affect
+Price Sync/Auto Orders at all and has no required-before-pulling migration. Existing machines that
+already have a Task Scheduler entry calling `matrix_image_save.py` directly need **no Task
+Scheduler changes at all** — pulling this repo adds that exact file back at the same path, doing
+the same job (see below). Configure `[images]` in `config.ini` only if/when you actually want that
+machine running it.
+
+---
+
+## Item Image Sync
+
+Downloads a `.jpg` for every active, AFI-supplied item (same `supplier_key`/`bool_bitul` filter
+`get_items()` already uses for price sync — see `get_item_codes()` in `db.py`) from the image host
+configured in `config.ini`'s `[images]` section, into the local MATRIX image folder (`local_folder`,
+matching each item to `<item_code>.jpg`). The actual logic lives in `images.py`'s `sync_images()`.
+
+**Two equivalent entry points, same underlying function, deliberately:**
+- `python matrix_image_save.py` — no arguments, thin wrapper. Kept specifically so existing Task
+  Scheduler entries across client machines (Program: `python`, Arguments: `matrix_image_save.py`,
+  Start in: `C:\update_process`) don't need to change at all. **This is what's actually scheduled
+  on machines today** — use it for new machines too, so every machine's Task Scheduler config stays
+  identical.
+- `python main.py -a images` — equivalent, for consistency with the other two actions' CLI and for
+  quick manual testing.
+
+- The image host is assumed public/unauthenticated (no credentials involved) — just a base URL a
+  `.jpg` gets appended to per item code.
+- A 404 for a given item is routine (not every item necessarily has a photo yet) and isn't counted
+  as an error; only network failures or unexpected response codes are.
+- Unlike Price Sync/Auto Orders, this doesn't need `[images]` configured to keep working —
+  `config.py` only raises on a missing `base_url` when `sync_images()` actually runs. Existing
+  machines can pull this update safely without touching `config.ini` at all, as long as they don't
+  also add the Image Sync scheduled task without configuring it first.
+- Reports to the health dashboard the same way `items()`/`orders()` do (`health.record_run('images',
+  ...)` with succ/tot/err counts).
 
 ---
 
@@ -150,6 +190,8 @@ guard against exactly that:
 python main.py                  # Price sync (default)
 python main.py -a orders        # Auto order submission
 python main.py -a orders -q     # Submit as quotes
+python main.py -a images        # Item image sync
+python matrix_image_save.py     # Item image sync (equivalent -- what's actually scheduled on machines)
 python main.py -l debug         # Enable debug logging
 ```
 
