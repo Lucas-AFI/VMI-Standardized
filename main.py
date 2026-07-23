@@ -104,6 +104,7 @@ def orders(p_quote=None):
             log_debug('No new orders found')
             log_debug('')
             log_debug('*********** Create New Orders process completed ***********')
+            health.record_run('orders', 'success', 0, 0)
             exit()
 
         for l_order in l_orders:

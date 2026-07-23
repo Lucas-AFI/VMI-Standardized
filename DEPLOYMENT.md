@@ -145,6 +145,14 @@ with **Start in** set to `C:\update_process`:
 | VMI Auto Orders | `python main.py -a orders` | *(runs within a bounded window per day on existing machines — confirm the exact interval the same way)* | |
 | VMI Health Reporter | `python health_reporter.py` | Every 15 minutes, indefinitely | **Own, independent** Task Scheduler entry — must keep running even if the two tasks above hang or crash. Run whether user is logged on or not: **Yes** |
 | VMI Script Updates | `update_scripts.bat` | Monthly | Pulls the latest code via `git pull` |
+Steps for this one: 
+  1. Create Basic Task
+  2. "VMI Monthly Script Update" or whatever title you want
+  3. Trigger monthly, select all months, and on the 1st of every month
+  4. Start a program
+  5. Program/Script: C:\update_process\update_scripts.bat
+  6. Add arguments: keep empty
+  7. Start in: C:\update_process
 
 ## 7. Post-deployment checklist
 
