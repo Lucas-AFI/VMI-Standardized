@@ -106,9 +106,9 @@ def orders(p_quote=None):
             close_db_conn(l_db_conn)
             log_debug('')
             log_debug('No new orders found')
-            log_debug('')
-            log_debug('*********** Create New Orders process completed ***********')
             health.record_run('orders', 'success', 0, 0)
+            stop_log('Create New Orders process', 0, 0)
+            rename_log()
             exit()
 
         for l_order in l_orders:

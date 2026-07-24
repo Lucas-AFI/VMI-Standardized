@@ -5,7 +5,8 @@ VMI Update Process - Logging Configuration
 from pathlib import Path
 from logging import basicConfig, getLogger, debug, info, warning, error, shutdown, DEBUG, INFO, WARNING, ERROR
 
-l_log_location = 'logs/app.log'
+l_script_dir = Path(__file__).resolve().parent
+l_log_location = str(l_script_dir / 'logs' / 'app.log')
 l_log_level = INFO
 
 

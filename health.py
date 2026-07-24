@@ -18,6 +18,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 l_db_location = 'health_state.db'
+l_failure_log = 'health_write_failures.log'
+
+
+def _log_write_failure(p_context, p_exc):
+    """
+    Record that a health-tracking write itself failed, without ever raising
+    -- record_event()/record_run() must still swallow the original exception
+    so a health-tracking bug can never break the real update_process run,
+    but a bare `pass` left zero trace when that happened (see the SafranPump
+    partial-order incident, where a real partial_order event silently never
+    made it into events). This is purely a diagnostic breadcrumb; a non-empty
+    health_write_failures.log is itself the signal something's wrong here.
+    """
+    try:
+        with open(l_failure_log, 'a') as f:
+            f.write(_now() + ' - ' + p_context + ': ' + repr(p_exc) + '\n')
+    except Exception:
+        pass
 
 
 def _connect():
@@ -89,11 +107,12 @@ def record_event(p_event_type, p_detail=None, p_po_code=None):
         )
         l_conn.commit()
         l_conn.close()
-    except Exception:
+    except Exception as e:
         # Health tracking must never break the actual update_process run.
         # If this fails, the missed event will simply not appear on the
-        # dashboard -- swallow it rather than raise.
-        pass
+        # dashboard -- swallow it rather than raise, but leave a trace (see
+        # _log_write_failure) so the failure itself isn't invisible too.
+        _log_write_failure('record_event(' + str(p_event_type) + ')', e)
 
 
 def event_already_recorded(p_event_type, p_po_code):
@@ -138,5 +157,5 @@ def record_run(p_run_type, p_status, p_succ_cnt=None, p_tot_cnt=None, p_err_cnt=
         )
         l_conn.commit()
         l_conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        _log_write_failure('record_run(' + str(p_run_type) + ')', e)
