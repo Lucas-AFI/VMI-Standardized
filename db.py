@@ -196,3 +196,43 @@ def get_stale_inflight(l_cursor):
     except Error as e:
         controlled_exit('FATAL: ' + str(e))
     return l_cursor.fetchall()
+
+
+def record_open_order(l_cursor, l_key, l_code, l_order_no):
+    #Start tracking a successfully-created P21 order so check_open_orders()
+    #in main.py can periodically ask P21 whether it's since been received/
+    #closed, and flag it if it's been open too long -- see erp_open_orders.sql
+    try:
+        l_cursor.execute(
+            'insert into dbo.erp_open_orders (po_key, po_code, order_no, submitted_at) '
+            'values (?, ?, ?, GETDATE())',
+            (l_key, l_code, l_order_no)
+        )
+    except Error as e:
+        controlled_exit('FATAL: ' + str(e))
+
+
+def get_open_orders(l_cursor):
+    #Fetch every P21 order still being tracked as open (not yet confirmed
+    #Completed/Cancelled/Deleted), with days_open computed in SQL Server
+    #(GETDATE()) rather than Python so it's not sensitive to any clock
+    #difference between this script's machine and the DB server -- see
+    #check_open_orders() in main.py
+    try:
+        l_cursor.execute(
+            'select po_key, po_code, order_no, '
+            'datediff(day, submitted_at, GETDATE()) as days_open '
+            'from dbo.erp_open_orders'
+        )
+    except Error as e:
+        controlled_exit('FATAL: ' + str(e))
+    return l_cursor.fetchall()
+
+
+def clear_open_order(l_cursor, l_key):
+    #Stop tracking an order once P21 reports it resolved (Completed/
+    #Cancelled/Deleted) -- see check_open_orders() in main.py
+    try:
+        l_cursor.execute('delete from dbo.erp_open_orders where po_key = ?', l_key)
+    except Error as e:
+        controlled_exit('FATAL: ' + str(e))

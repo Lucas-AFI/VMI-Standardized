@@ -14,11 +14,16 @@ from sys import exit
 import traceback
 from log import configure_logs, log_debug, log_info, log_error, start_log, stop_log, log_shutdown, set_level
 from utils import coalesce, email, rename_log, check_order, get_contract, classify_dropped_item
-from db import connect_db, close_db_conn, get_items, update_item, get_orders, get_order_items, update_order, mark_inflight, clear_inflight, get_stale_inflight
-from api import get_item, get_customer_name, create_order, approve_order, check_item_availability
+from db import connect_db, close_db_conn, get_items, update_item, get_orders, get_order_items, update_order, mark_inflight, clear_inflight, get_stale_inflight, record_open_order, get_open_orders, clear_open_order
+from api import get_item, get_customer_name, create_order, approve_order, check_item_availability, get_order_status
 from xml_processor import build_order, add_line_item, print_xml
 from images import sync_images
 import health
+
+# Threshold for flagging a P21 order that's sat open (not yet Completed/
+# Cancelled/Deleted) too long without being received/closed -- see
+# check_open_orders() below. Expected to be tuned later.
+STALE_OPEN_ORDER_DAYS = 3
 
 
 def items():
@@ -69,6 +74,52 @@ def items():
         raise
 
 
+def _order_is_resolved(p_order_status):
+    # P21's API reference only documents these as untyped strings (no
+    # enumerated Y/N values confirmed) -- treat any common truthy spelling as
+    # resolved so this errs toward under- rather than over-flagging. Verify
+    # against a real response before relying on this, and adjust if P21
+    # turns out to use a different convention.
+    l_order = (p_order_status or {}).get('Order') or {}
+    l_flags = (l_order.get('Completed'), l_order.get('CancelledFlag'), l_order.get('DeletedFlag'))
+    return any(str(f).strip().upper() in ('Y', 'YES', 'TRUE', '1') for f in l_flags if f)
+
+
+def check_open_orders(l_cursor):
+    # For every P21 order still being tracked as open, ask P21 for its
+    # current status: stop tracking it once resolved (Completed/Cancelled/
+    # Deleted), or flag it once -- event_already_recorded() keeps this to one
+    # row per PO, same pattern as stale_inflight_order -- once it's been open
+    # longer than STALE_OPEN_ORDER_DAYS. See erp_open_orders.sql.
+    for l_open_order in get_open_orders(l_cursor):
+        try:
+            l_status = get_order_status(l_open_order.order_no)
+        except Exception as e:
+            log_error('Open-order status check failed for OrderNo ' + str(l_open_order.order_no) + ': ' + str(e))
+            continue
+
+        if 'ResourceError' in l_status:
+            log_error(
+                'Open-order status check returned ResourceError for OrderNo ' +
+                str(l_open_order.order_no) + ': ' + str(l_status['ResourceError'])
+            )
+            continue
+
+        if _order_is_resolved(l_status):
+            clear_open_order(l_cursor, l_open_order.po_key)
+            continue
+
+        if l_open_order.days_open >= STALE_OPEN_ORDER_DAYS:
+            l_po_code = str(l_open_order.po_code or l_open_order.order_no)
+            if not health.event_already_recorded('stale_open_order', l_po_code):
+                health.record_event(
+                    'stale_open_order',
+                    'Order ' + str(l_open_order.order_no) + ' (po_code = ' + str(l_open_order.po_code or '') +
+                    ') has been open ' + str(l_open_order.days_open) + ' day(s) without being received/closed',
+                    l_po_code
+                )
+
+
 def orders(p_quote=None):
     # Submit pending Matrix purchase orders to P21
     l_tot_cnt = 0
@@ -99,6 +150,8 @@ def orders(p_quote=None):
                         'Orders stuck in-flight for over 1 hour (possible crash mid-submission): ' + str(l_stale_row.po_key),
                         str(l_stale_row.po_key)
                     )
+
+        check_open_orders(l_cursor)
 
         l_orders = get_orders(l_cursor)
 
@@ -154,6 +207,8 @@ def orders(p_quote=None):
                     email('Matrix Auto Order Item Exception(s) for ' + get_customer_name(), l_message_with_cause, False)
                     health.record_event('partial_order', l_message_with_cause, str(l_order.po_code or ''))
                     clear_inflight(l_cursor, l_order.po_key)
+                    if not p_quote:
+                        record_open_order(l_cursor, l_order.po_key, str(l_order.po_code or ''), l_order_no)
                     l_succ_cnt += 1
 
                 else:
@@ -161,6 +216,8 @@ def orders(p_quote=None):
                     update_order(l_cursor, l_order.po_key)
                     log_info('Order created: P21 OrderNo = ' + l_order_no + ' and po_code = ' + str(l_order.po_code))
                     clear_inflight(l_cursor, l_order.po_key)
+                    if not p_quote:
+                        record_open_order(l_cursor, l_order.po_key, str(l_order.po_code or ''), l_order_no)
                     l_succ_cnt += 1
 
             except Exception as e:

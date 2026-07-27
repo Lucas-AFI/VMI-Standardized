@@ -152,6 +152,23 @@ def check_item_availability(p_item_ids):
     return {i['ItemId']: i for i in l_info if isinstance(i, dict) and 'ItemId' in i}
 
 
+def get_order_status(p_orderno):
+    """
+    Get the current state of a previously-submitted order (used to check
+    whether it's since been received/closed by P21, or is still sitting
+    open -- see check_open_orders() in main.py). Response includes
+    Completed/CancelledFlag/DeletedFlag at the order-header level.
+    """
+    l_headers = {"Authorization": "Bearer " + l_token, "Content-Length": "0"}
+    l_endpoint = l_base_url + '/sales/orders/' + p_orderno
+    l_response = requests.get(l_endpoint, headers=l_headers).text
+    try:
+        l_dict = xmltodict.parse(l_response)
+    except xmltodict.expat.ExpatError:
+        l_dict = {'ResourceError': 'No Api Records'}
+    return l_dict
+
+
 def approve_order(p_orderno):
     """Approve a P21 order by order number"""
     l_headers = {"Authorization": "Bearer " + l_token, "Content-Type": "application/xml"}
