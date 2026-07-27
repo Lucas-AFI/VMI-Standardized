@@ -17,8 +17,15 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-l_db_location = 'health_state.db'
-l_failure_log = 'health_write_failures.log'
+# Absolute, resolved off this file's own location -- not the process cwd.
+# main.py and health_reporter.py run under separate, independent Task
+# Scheduler entries; if a relative path here resolved against whatever cwd
+# each task happened to start in, the two processes could silently read/write
+# two different actual files despite using the same relative name (see the
+# app.log fix this mirrors, and the SafranPump incident that surfaced it).
+l_script_dir = Path(__file__).resolve().parent
+l_db_location = str(l_script_dir / 'health_state.db')
+l_failure_log = str(l_script_dir / 'health_write_failures.log')
 
 
 def _log_write_failure(p_context, p_exc):

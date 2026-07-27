@@ -29,6 +29,7 @@ Falls back to [DEFAULT]/sql_* config for the stale-order approximation.
 import json
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
@@ -36,8 +37,16 @@ import config          # existing standardized-repo module: reads config.ini
 import credentials      # existing standardized-repo module: keyring wrapper
 from db import connect_db, close_db_conn  # read-only use here
 
-l_health_db = 'health_state.db'
-l_reporter_log = 'logs/health_reporter.log'
+# Absolute, resolved off this file's own location -- not the process cwd. This
+# script has its own, separate Task Scheduler entry from main.py by design
+# (see module docstring); a relative path here would let the two processes
+# silently disagree about which actual health_state.db file they're reading/
+# writing if the two tasks' "Start in" settings ever differ. Same class of
+# bug as the app.log fix in log.py, and the reason this got looked at.
+l_script_dir = Path(__file__).resolve().parent
+l_health_db = str(l_script_dir / 'health_state.db')
+l_reporter_log = str(l_script_dir / 'logs' / 'health_reporter.log')
+l_reporter_log_dir = l_script_dir / 'logs'
 
 # How long a PO can sit in erp_send_state with status = 'inflight' before we
 # treat it as stuck (crash/lost connection mid-submission). Kept in sync with
@@ -47,6 +56,11 @@ STALE_ORDER_HOURS = 1
 
 
 def _log(p_line):
+    # This script never imports log.py (see module docstring), so nothing
+    # else creates logs/ on its behalf -- without this, a fresh machine's
+    # first run would crash on FileNotFoundError before writing anything,
+    # including the record of that crash.
+    l_reporter_log_dir.mkdir(exist_ok=True)
     with open(l_reporter_log, 'a') as f:
         f.write(datetime.now(timezone.utc).isoformat() + ' - ' + p_line + '\n')
 
