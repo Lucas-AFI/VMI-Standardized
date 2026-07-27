@@ -11,6 +11,7 @@ Usage:
 
 from argparse import ArgumentParser
 from sys import exit
+from time import sleep
 import traceback
 from log import configure_logs, log_debug, log_info, log_error, start_log, stop_log, log_shutdown, set_level
 from utils import coalesce, email, rename_log, check_order, get_contract, classify_dropped_item
@@ -24,6 +25,15 @@ import health
 # Cancelled/Deleted) too long without being received/closed -- see
 # check_open_orders() below. Expected to be tuned later.
 STALE_OPEN_ORDER_DAYS = 3
+
+# How many times (and how long to wait between tries) to ask P21 to confirm
+# a just-created order actually exists there, before giving up -- see
+# confirm_order_created() below. A single immediate GET right after the
+# create_order() POST can race P21's own indexing of the new order, so this
+# gives it a few seconds' grace rather than treating a false-negative as a
+# real failure.
+ORDER_CONFIRM_ATTEMPTS = 3
+ORDER_CONFIRM_RETRY_DELAY = 5
 
 
 def items():
@@ -120,6 +130,36 @@ def check_open_orders(l_cursor):
                 )
 
 
+def _order_confirmed(p_order_no, p_order_status):
+    if not p_order_status or 'ResourceError' in p_order_status:
+        return False
+    l_order = p_order_status.get('Order') or {}
+    return str(l_order.get('OrderNo') or '') == str(p_order_no)
+
+
+def confirm_order_created(p_order_no):
+    # check_order() only ever validates create_order()'s own POST response --
+    # it never independently checks that P21 actually persisted the order.
+    # This closes that gap with a follow-up GET (see get_order_status() in
+    # api.py), retrying briefly in case of an indexing race, before treating
+    # it as a real "P21 doesn't have this" failure rather than a POST
+    # response that merely looked fine.
+    for l_attempt in range(ORDER_CONFIRM_ATTEMPTS):
+        try:
+            l_status = get_order_status(p_order_no)
+        except Exception as e:
+            log_error('Order confirmation check failed for OrderNo ' + str(p_order_no) + ': ' + str(e))
+            l_status = None
+
+        if _order_confirmed(p_order_no, l_status):
+            return True
+
+        if l_attempt < ORDER_CONFIRM_ATTEMPTS - 1:
+            sleep(ORDER_CONFIRM_RETRY_DELAY)
+
+    return False
+
+
 def orders(p_quote=None):
     # Submit pending Matrix purchase orders to P21
     l_tot_cnt = 0
@@ -187,34 +227,53 @@ def orders(p_quote=None):
                     health.record_event('order_error', l_message, str(l_order.po_code or ''))
                     clear_inflight(l_cursor, l_order.po_key)
 
-                elif l_status == 'partial':
-                    l_order_no = l_response
-                    update_order(l_cursor, l_order.po_key)
-                    log_info('Order created with skipped items: P21 OrderNo = ' + l_order_no + ' and po_code = ' + str(l_order.po_code))
-
-                    # Diagnostic-only: check why the dropped item(s) were unavailable
-                    # (stock-out vs. a likely SKU mapping issue), batched into one
-                    # P21 call per order. Purely additive -- never blocks or crashes
-                    # the partial-order handling above, which already worked before this.
-                    l_availability = check_item_availability(l_dropped_item_ids)
-                    l_cause_lines = [
-                        'ItemId: ' + l_dropped_id + ' - Probable cause: ' + classify_dropped_item(l_availability.get(l_dropped_id))
-                        for l_dropped_id in l_dropped_item_ids
-                    ]
-                    l_message_with_cause = l_message + ('\n' + '\n'.join(l_cause_lines) + '\n' if l_cause_lines else '')
-
-                    log_error('Items skipped in order ' + l_order_no + ':\n' + l_message_with_cause)
-                    email('Matrix Auto Order Item Exception(s) for ' + get_customer_name(), l_message_with_cause, False)
-                    health.record_event('partial_order', l_message_with_cause, str(l_order.po_code or ''))
-                    clear_inflight(l_cursor, l_order.po_key)
-                    if not p_quote:
-                        record_open_order(l_cursor, l_order.po_key, str(l_order.po_code or ''), l_order_no)
-                    l_succ_cnt += 1
-
                 else:
                     l_order_no = l_response
-                    update_order(l_cursor, l_order.po_key)
-                    log_info('Order created: P21 OrderNo = ' + l_order_no + ' and po_code = ' + str(l_order.po_code))
+
+                    if not confirm_order_created(l_order_no):
+                        log_error(
+                            'Order ' + l_order_no + ' (po_code = ' + str(l_order.po_code or '') +
+                            ') was reported created by P21 but could not be confirmed after retrying -- '
+                            'leaving in-flight for manual review'
+                        )
+                        email(
+                            'Matrix Auto Order ALERT - Unconfirmed Order for ' + get_customer_name(),
+                            'P21 reported order ' + l_order_no + ' (po_code = ' + str(l_order.po_code or '') +
+                            ') as created, but a follow-up check could not confirm it actually exists in P21.'
+                            '\n\nManually verify in P21 whether this order exists, then either delete the '
+                            'erp_send_state row (if not actually sent) or set send_erp = 1 (if it did go '
+                            'through) as appropriate.',
+                            False
+                        )
+                        health.record_event(
+                            'order_not_confirmed',
+                            'OrderNo ' + l_order_no + ' was reported created but P21 did not confirm it exists after retrying',
+                            str(l_order.po_code or '')
+                        )
+                        continue
+
+                    if l_status == 'partial':
+                        update_order(l_cursor, l_order.po_key)
+                        log_info('Order created with skipped items: P21 OrderNo = ' + l_order_no + ' and po_code = ' + str(l_order.po_code))
+
+                        # Diagnostic-only: check why the dropped item(s) were unavailable
+                        # (stock-out vs. a likely SKU mapping issue), batched into one
+                        # P21 call per order. Purely additive -- never blocks or crashes
+                        # the partial-order handling above, which already worked before this.
+                        l_availability = check_item_availability(l_dropped_item_ids)
+                        l_cause_lines = [
+                            'ItemId: ' + l_dropped_id + ' - Probable cause: ' + classify_dropped_item(l_availability.get(l_dropped_id))
+                            for l_dropped_id in l_dropped_item_ids
+                        ]
+                        l_message_with_cause = l_message + ('\n' + '\n'.join(l_cause_lines) + '\n' if l_cause_lines else '')
+
+                        log_error('Items skipped in order ' + l_order_no + ':\n' + l_message_with_cause)
+                        email('Matrix Auto Order Item Exception(s) for ' + get_customer_name(), l_message_with_cause, False)
+                        health.record_event('partial_order', l_message_with_cause, str(l_order.po_code or ''))
+                    else:
+                        update_order(l_cursor, l_order.po_key)
+                        log_info('Order created: P21 OrderNo = ' + l_order_no + ' and po_code = ' + str(l_order.po_code))
+
                     clear_inflight(l_cursor, l_order.po_key)
                     if not p_quote:
                         record_open_order(l_cursor, l_order.po_key, str(l_order.po_code or ''), l_order_no)
