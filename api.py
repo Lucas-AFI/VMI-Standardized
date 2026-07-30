@@ -6,13 +6,40 @@ Machine-specific settings are read from config.ini via config.py.
 """
 
 import requests
+from requests.exceptions import RequestException
+from time import sleep
 import xmltodict
 from xml_processor import tostring
 from credentials import get_base_url, get_api_username, get_api_password
 from config import get_customer_id, get_location_id
-from log import log_error
+from log import log_debug, log_error
 
 l_base_url = get_base_url()
+
+REQUEST_TIMEOUT = 15          # seconds, per attempt
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 2      # doubles each attempt: 2s, 4s, 8s
+
+
+def _request_with_retry(method, url, **kwargs):
+    """
+    Thin wrapper around requests.get/requests.post/requests.put that adds a
+    timeout and retries transient network/SSL/connection failures with
+    backoff before giving up. Does NOT catch or reinterpret HTTP status
+    codes or response body content -- callers still handle ResourceError /
+    malformed XML / etc. exactly as they do today. Only protects against the
+    underlying connection never completing at all.
+    """
+    l_last_exc = None
+    for l_attempt in range(RETRY_ATTEMPTS):
+        try:
+            return method(url, timeout=REQUEST_TIMEOUT, **kwargs)
+        except RequestException as e:
+            l_last_exc = e
+            log_debug('Request attempt ' + str(l_attempt + 1) + '/' + str(RETRY_ATTEMPTS) + ' failed for ' + url + ': ' + str(e))
+            if l_attempt < RETRY_ATTEMPTS - 1:
+                sleep(RETRY_BACKOFF_SECONDS * (2 ** l_attempt))
+    raise l_last_exc
 
 
 def get_token():
@@ -23,14 +50,14 @@ def get_token():
         '/security/token/?username=' + get_api_username() +
         '&password=' + get_api_password()
     )
-    return requests.post(l_endpoint, headers=l_headers).text
+    return _request_with_retry(requests.post, l_endpoint, headers=l_headers).text
 
 
 def get_customer_name():
     """Get customer name from P21 for email subjects"""
     l_headers = {"Authorization": "Bearer " + l_token, "Content-Length": "0"}
     l_endpoint = l_base_url + '/entity/customers/AFI_' + get_customer_id()
-    l_response = requests.get(l_endpoint, headers=l_headers).text
+    l_response = _request_with_retry(requests.get, l_endpoint, headers=l_headers).text
     try:
         l_dict = xmltodict.parse(l_response)
         l_customer = l_dict['Customer']['CustomerName']
@@ -51,7 +78,7 @@ def get_item(p_item):
         '&saleslocid=' + l_loc +
         '&sourcelocid=' + l_loc
     )
-    l_response = requests.get(l_endpoint, headers=l_headers).text
+    l_response = _request_with_retry(requests.get, l_endpoint, headers=l_headers).text
     try:
         l_dict = xmltodict.parse(l_response)
     except xmltodict.expat.ExpatError:
@@ -86,7 +113,7 @@ def get_item_post(p_item, p_contract):
     """
     l_headers = {"Authorization": "Bearer " + l_token, "Content-Type": "application/xml"}
     l_endpoint = l_base_url + '/ecommerce'
-    l_response = requests.post(l_endpoint, headers=l_headers, data=l_xml).text
+    l_response = _request_with_retry(requests.post, l_endpoint, headers=l_headers, data=l_xml).text
     try:
         l_dict = xmltodict.parse(l_response)
     except xmltodict.expat.ExpatError:
@@ -99,7 +126,7 @@ def create_order(p_xml):
     l_data = tostring(p_xml)
     l_headers = {"Authorization": "Bearer " + l_token, "Content-Type": "application/xml"}
     l_endpoint = l_base_url + '/sales/orders'
-    l_response = requests.post(l_endpoint, data=l_data, headers=l_headers).text
+    l_response = _request_with_retry(requests.post, l_endpoint, data=l_data, headers=l_headers).text
     try:
         l_dict = xmltodict.parse(l_response)
     except xmltodict.expat.ExpatError:
@@ -135,7 +162,7 @@ def check_item_availability(p_item_ids):
     )
 
     try:
-        l_response = requests.post(l_endpoint, headers=l_headers, data=l_xml).text
+        l_response = _request_with_retry(requests.post, l_endpoint, headers=l_headers, data=l_xml).text
         l_dict = xmltodict.parse(l_response)
     except Exception as e:
         log_error('Item availability check failed (network/parse error): ' + str(e))
@@ -161,7 +188,7 @@ def get_order_status(p_orderno):
     """
     l_headers = {"Authorization": "Bearer " + l_token, "Content-Length": "0"}
     l_endpoint = l_base_url + '/sales/orders/' + p_orderno
-    l_response = requests.get(l_endpoint, headers=l_headers).text
+    l_response = _request_with_retry(requests.get, l_endpoint, headers=l_headers).text
     try:
         l_dict = xmltodict.parse(l_response)
     except xmltodict.expat.ExpatError:
@@ -173,7 +200,7 @@ def approve_order(p_orderno):
     """Approve a P21 order by order number"""
     l_headers = {"Authorization": "Bearer " + l_token, "Content-Type": "application/xml"}
     l_endpoint = l_base_url + '/sales/orders/' + p_orderno + '/approve'
-    l_response = requests.put(l_endpoint, headers=l_headers).text
+    l_response = _request_with_retry(requests.put, l_endpoint, headers=l_headers).text
     return l_response
 
 
