@@ -94,7 +94,13 @@ def get_item_codes(l_cursor):
 def get_orders(l_cursor):
     #Fetch all pending orders not yet sent to ERP, excluding any currently
     #marked in-flight in erp_send_state (crash/duplicate-submission guard --
-    #see mark_inflight/clear_inflight/get_stale_inflight below)
+    #see mark_inflight/clear_inflight/get_stale_inflight below).
+    #status_key = 1 (Opened) is an allowlist, not a denylist against
+    #status_key = 4 (Closed) specifically -- a Closed-but-unsent PO must
+    #never be picked up regardless of send_erp, and any other status value
+    #this table might ever contain is excluded by default unless it's
+    #explicitly, unambiguously Opened. Both this and send_erp = 0 are
+    #required together; neither replaces the other.
     try:
         l_cursor.execute(
             'select distinct po_key, po_code '
@@ -103,6 +109,7 @@ def get_orders(l_cursor):
             'and send_erp = 0 '
             'and supplier_key = ' + str(SUPPLIER_KEY) + ' '
             'and bool_bitul = 0 '
+            'and status_key = 1 '
             'and po_key not in (select po_key from dbo.erp_send_state)'
         )
     except Error as e:

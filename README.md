@@ -148,6 +148,50 @@ silently stops running.
 
 ---
 
+## Order Eligibility (`status_key` + `send_erp`)
+
+**Incident (2026):** on Gray Mfg, a large number of historical POs — some dating back to November
+2025 — were found `Closed` in Matrix's UI (`status_key = 4`) but had never had `send_erp` flipped to
+`1`. `get_orders()` had never filtered on `status_key` at all, so these closed-but-unsent POs were
+invisible to every existing safeguard and sat dormant until a manual test run of `main.py -a orders`
+picked all of them up and submitted ~50 orders to P21 in a single pass. All 50 were caught and
+manually cancelled in P21 after the fact.
+
+`get_orders()` now requires **both**, together — neither replaces the other:
+- `send_erp = 0` (not yet sent), **and**
+- `status_key = 1` (explicitly `Opened`)
+
+This is deliberately an **allowlist** (`status_key = 1`), not a denylist (`status_key <> 4`). A
+denylist only protects against the one bad value found this time; any other non-`Opened` status the
+fleet hasn't encountered yet (a future Matrix upgrade, a different workflow, a status code specific
+to some other client's install) would still silently pass through. `status_key = 1` fails closed —
+a PO is only ever picked up when it's unambiguously `Opened`, full stop.
+
+**The `1 = Opened` / `4 = Closed` mapping is confirmed only against Gray Mfg's database.** Before
+relying on this on a new machine, spot-check it there too:
+```sql
+SELECT po_code, status_key FROM dbo.ent_po_headers WHERE po_code IN ('<a known-Opened PO>', '<a known-Closed PO>');
+```
+against POs of known status in that machine's own Matrix UI. If `status_key` turns out to be a fixed
+system-level lookup shipped identically with every Matrix install, this is likely universal — but
+per this repo's own history (Sun Hydraulics/Spare Parts' separately hand-built `erp_send_state`,
+C&C's `SourceLocId`/`&`-character quirks), per-site divergence is the norm here, not the exception.
+Don't assume; confirm.
+
+`IS_SEND` was investigated as a candidate for this same purpose and ruled out — see
+[VMI_Health_Dashboard_Plan.md](VMI_Health_Dashboard_Plan.md)'s "Notably Deprioritized" section; it
+belongs to a separate, manual PO approval workflow within Matrix, unrelated to this pipeline.
+
+**Deploying this to an already-standardized machine:** verify manually
+(`python main.py -a orders -l debug`) against that machine's real data before trusting a scheduled
+task with it — specifically confirm a known-`Closed`, unsent PO is excluded from the result set.
+Given the severity of the incident this closes, treat this as a priority rollout to every client
+machine already on the standardized repo, not just Gray Mfg — the same silent gap could be sitting
+dormant on any of the other ~150 sites right now, waiting for the same trigger (a manual test run,
+or simply enough time passing).
+
+---
+
 ## Duplicate-Order Guard (`erp_send_state`)
 
 `ent_po_headers.send_erp` alone isn't a safe guard against resubmission: if the script crashes, loses
@@ -159,8 +203,9 @@ guard against exactly that:
 
 1. Before calling P21, `mark_inflight()` inserts a `po_key` row into `erp_send_state` with
    `status = 'inflight'`.
-2. `get_orders()` only ever returns POs that are **both** `send_erp = 0` **and** absent from
-   `erp_send_state` — so a PO stuck mid-submission is never picked up again automatically.
+2. `get_orders()` only ever returns POs that are `send_erp = 0`, `status_key = 1` (see Order
+   Eligibility above), **and** absent from `erp_send_state` — so a PO stuck mid-submission is never
+   picked up again automatically.
 3. Once the outcome is known (`success`, `partial`, or an explicit `error` response from P21),
    `clear_inflight()` removes the row. If the submission call itself raises an exception, the row is
    deliberately left behind — the outcome is unknown, so leaving the guard in place is safer than

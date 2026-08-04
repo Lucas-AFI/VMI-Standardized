@@ -168,6 +168,10 @@ Steps for this one:
 ## 7. Post-deployment checklist
 
 - [ ] `erp_send_state` exists on this machine's database and matches `sql/erp_send_state.sql`
+- [ ] Confirmed this machine's `status_key = 1` really means `Opened` (see "Order Eligibility" in
+      README.md) — spot-check against a PO of known Opened/Closed status in this machine's own
+      Matrix UI before trusting `get_orders()`'s filtering here; do not assume the Gray Mfg mapping
+      holds without checking
 - [ ] `config.ini` fully filled in; `collect_config.py --verify` passes
 - [ ] Manual run of both `main.py` order/price actions succeeded and the email notification arrived
 - [ ] If running Item Image Sync: manual `matrix_image_save.py` run succeeded and `.jpg` files landed in `local_folder`
