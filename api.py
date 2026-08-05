@@ -42,6 +42,32 @@ def _request_with_retry(method, url, **kwargs):
     raise l_last_exc
 
 
+def _request_once(method, url, **kwargs):
+    """
+    Single-attempt request with a timeout but deliberately NO retry -- for
+    non-idempotent calls only (create_order, approve_order), where a
+    connection failure after P21 has already processed the request cannot
+    be told apart from a connection failure before it ever arrived.
+    Retrying blindly risks re-submitting an already-created order.
+
+    Incident, 2026-08-05: PO 1160 got three duplicate orders created in P21
+    from a single script run. Root cause: _request_with_retry() doesn't
+    distinguish "request never reached P21" from "P21 created the order but
+    the response never made it back" -- it retried the same create_order()
+    POST up to RETRY_ATTEMPTS times, and P21 apparently succeeded server-side
+    on more than one of those attempts. send_erp never got set (the retry
+    loop exhausted and raised, so update_order() was never reached), so the
+    PO looked like a total failure locally while sitting three-times-created
+    in P21.
+
+    A single failure here surfaces as an exception straight to the caller,
+    leaving erp_send_state 'inflight' and the order unconfirmed -- exactly
+    the state get_stale_inflight() exists to catch and flag for a human,
+    *before* a duplicate can be created rather than after.
+    """
+    return method(url, timeout=REQUEST_TIMEOUT, **kwargs)
+
+
 def get_token():
     """Get bearer token for P21 API authentication"""
     l_headers = {"Content-Length": "0"}
@@ -122,11 +148,17 @@ def get_item_post(p_item, p_contract):
 
 
 def create_order(p_xml):
-    """Submit order XML to P21"""
+    """
+    Submit order XML to P21. Deliberately NOT retried (see _request_once) --
+    this creates a real order server-side; blindly retrying a connection
+    failure risks creating duplicates if P21 processed the request but the
+    response was lost. A failure here is expected to propagate to the
+    caller and leave the order un-cleared in erp_send_state for review.
+    """
     l_data = tostring(p_xml)
     l_headers = {"Authorization": "Bearer " + l_token, "Content-Type": "application/xml"}
     l_endpoint = l_base_url + '/sales/orders'
-    l_response = _request_with_retry(requests.post, l_endpoint, data=l_data, headers=l_headers).text
+    l_response = _request_once(requests.post, l_endpoint, data=l_data, headers=l_headers).text
     try:
         l_dict = xmltodict.parse(l_response)
     except xmltodict.expat.ExpatError:
@@ -197,10 +229,13 @@ def get_order_status(p_orderno):
 
 
 def approve_order(p_orderno):
-    """Approve a P21 order by order number"""
+    """
+    Approve a P21 order by order number. Deliberately NOT retried (see
+    _request_once) -- same non-idempotency concern as create_order().
+    """
     l_headers = {"Authorization": "Bearer " + l_token, "Content-Type": "application/xml"}
     l_endpoint = l_base_url + '/sales/orders/' + p_orderno + '/approve'
-    l_response = _request_with_retry(requests.put, l_endpoint, headers=l_headers).text
+    l_response = _request_once(requests.put, l_endpoint, headers=l_headers).text
     return l_response
 
 
