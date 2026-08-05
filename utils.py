@@ -3,18 +3,24 @@ VMI Update Process - Utility Functions
 Handles order validation, email notifications, and helper functions
 """
 
-from smtplib import SMTP
+from smtplib import SMTP, SMTPException, SMTPServerDisconnected, SMTPConnectError
 from ssl import create_default_context
 from os import path, rename
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-from log import l_log_location
+from log import l_log_location, log_debug, log_error
 from datetime import datetime
+from time import sleep
 from config import get_email_to, get_email_cc, get_contract_id
 import credentials
+import health
 
 SMTP_FROM = 'afireports@afi-tools.com'
+
+SMTP_TIMEOUT = 15          # seconds, per attempt
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 2  # doubles each attempt: 2s, 4s, 8s
 
 
 def check_order(p_dict, p_item_list):
@@ -99,6 +105,54 @@ def rename_log():
     rename(l_log_location, l_log_location[:-4] + '_' + l_timestamp + '.log')
 
 
+def _is_retryable_smtp_error(p_exc):
+    """
+    True for connection-level failures (network/SSL/timeout) worth retrying.
+    False for protocol-level rejections (bad auth, refused recipients, bad
+    data, etc.) that will fail identically on retry.
+
+    Note: smtplib.SMTPException itself is a subclass of OSError in Python 3
+    -- a bare `isinstance(e, OSError)` check would therefore also match
+    things like SMTPAuthenticationError and incorrectly retry them. This
+    explicitly excludes any SMTPException that isn't one of the two
+    "the connection itself didn't work" subtypes.
+    """
+    if isinstance(p_exc, (SMTPServerDisconnected, SMTPConnectError)):
+        return True
+    return isinstance(p_exc, OSError) and not isinstance(p_exc, SMTPException)
+
+
+def _send_email_with_retry(p_msg, p_all_recip):
+    """
+    Do the actual SMTP send, retrying transient connection failures with
+    backoff -- same philosophy as api.py's _request_with_retry(). See
+    _is_retryable_smtp_error() for exactly what counts as "transient".
+
+    Returns sendmail()'s result: a dict of any individually-refused
+    recipients, even when the overall call "succeeds" (previously silently
+    discarded). Raises on total failure -- email() below is responsible for
+    catching this and never letting it propagate further.
+    """
+    l_last_exc = None
+    for l_attempt in range(RETRY_ATTEMPTS):
+        try:
+            context = create_default_context()
+            s = SMTP('smtp.sendgrid.net', 587, timeout=SMTP_TIMEOUT)
+            s.starttls(context=context)
+            s.login('apikey', credentials.get_sendgrid_api_key())
+            l_refused = s.sendmail(SMTP_FROM, p_all_recip, p_msg.as_string())
+            s.quit()
+            return l_refused
+        except Exception as e:
+            if not _is_retryable_smtp_error(e):
+                raise
+            l_last_exc = e
+            log_debug('Email send attempt ' + str(l_attempt + 1) + '/' + str(RETRY_ATTEMPTS) + ' failed (connection issue): ' + str(e))
+            if l_attempt < RETRY_ATTEMPTS - 1:
+                sleep(RETRY_BACKOFF_SECONDS * (2 ** l_attempt))
+    raise l_last_exc
+
+
 def email(p_subject, p_message="", p_log=True, p_attach=True):
     """
     Send email notification with optional log file attachment.
@@ -108,6 +162,19 @@ def email(p_subject, p_message="", p_log=True, p_attach=True):
         p_message : email body (used when p_log=False)
         p_log     : if True, attach/embed the log file
         p_attach  : if True, attach log as file; if False, embed in body
+
+    Never raises. Retries transient connection failures; on total failure
+    (retries exhausted, or a non-retryable rejection like bad auth or a
+    refused recipient) logs it and records an 'email_failure' health event,
+    then returns normally either way. A notification failure must never be
+    mistaken for the actual price sync / order submission work having
+    failed, and must never block that work's own state tracking
+    (clear_inflight/record_open_order/rename_log/etc.) from completing --
+    this mirrors the SSL failure that killed American Torch Tip's price
+    sync (see api.py's _request_with_retry), and fixes a latent bug where a
+    mid-loop email hiccup in orders() could previously leave a
+    successfully-submitted order's erp_send_state stuck 'inflight' just
+    because the *notification* about it failed.
     """
     l_to = get_email_to()
     l_cc = get_email_cc()
@@ -132,9 +199,15 @@ def email(p_subject, p_message="", p_log=True, p_attach=True):
     else:
         msg.attach(MIMEText(p_message or ''))
 
-    context = create_default_context()
-    s = SMTP('smtp.sendgrid.net', 587)
-    s.starttls(context=context)
-    s.login('apikey', credentials.get_sendgrid_api_key())
-    s.sendmail(SMTP_FROM, l_all_recip, msg.as_string())
-    s.quit()
+    try:
+        l_refused = _send_email_with_retry(msg, l_all_recip)
+    except Exception as e:
+        log_error('Email send failed for "' + p_subject + '": ' + str(e))
+        health.record_event('email_failure', 'Subject: ' + p_subject + ' -- ' + str(e))
+        return
+
+    if l_refused:
+        log_error('Email "' + p_subject + '" partially failed -- recipient(s) refused: ' + str(l_refused))
+        health.record_event('email_failure', 'Subject: ' + p_subject + ' -- recipients refused: ' + str(l_refused))
+    else:
+        log_debug('Email sent: ' + p_subject)

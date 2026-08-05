@@ -102,6 +102,10 @@ def record_event(p_event_type, p_detail=None, p_po_code=None):
                             pass/fail flag and gets silently overwritten by
                             the next successful run -- this is what leaves a
                             durable, dashboard-visible trace of what broke.
+        'email_failure'  - utils.email() exhausted its retries, or SendGrid
+                            refused one or more recipients -- recorded, but
+                            deliberately never raised back to the caller
+                            (see email()'s own docstring for why).
     p_detail: free-text detail/summary (e.g. the check_order() message)
     p_po_code: related PO code, if applicable
     """
