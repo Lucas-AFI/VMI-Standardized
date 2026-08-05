@@ -106,6 +106,14 @@ def record_event(p_event_type, p_detail=None, p_po_code=None):
                             refused one or more recipients -- recorded, but
                             deliberately never raised back to the caller
                             (see email()'s own docstring for why).
+        'order_submission_error' - create_order() raised (e.g. a connection
+                            timeout) with no way to know whether P21 actually
+                            received/created the order before the failure.
+                            erp_send_state stays 'inflight' for this PO --
+                            get_stale_inflight() will also flag it after an
+                            hour, but this fires immediately so a human isn't
+                            waiting on that sweep to find out (see orders()
+                            in main.py).
     p_detail: free-text detail/summary (e.g. the check_order() message)
     p_po_code: related PO code, if applicable
     """

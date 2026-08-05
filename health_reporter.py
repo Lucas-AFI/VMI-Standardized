@@ -154,7 +154,7 @@ def build_payload():
     ]
 
     l_has_error = (
-        any(e['event_type'] in ('order_error', 'partial_order', 'db_error', 'api_error', 'run_failure', 'email_failure') for e in l_event_dicts)
+        any(e['event_type'] in ('order_error', 'partial_order', 'db_error', 'api_error', 'run_failure', 'email_failure', 'order_submission_error') for e in l_event_dicts)
         or any(r.get('last_status') == 'error' for r in l_run_log.values())
         or len(l_stale) > 0
     )

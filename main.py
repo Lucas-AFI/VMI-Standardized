@@ -285,7 +285,15 @@ def orders(p_quote=None):
                 # outcome of create_order() is unknown (it may have reached
                 # P21 before this failed), so leave the guard in place rather
                 # than risk a duplicate submission next run. get_stale_inflight()
-                # flags it after an hour for manual review.
+                # flags it after an hour for manual review -- but that's up to
+                # an hour of silence on the dashboard before anyone would know.
+                # Record it immediately too, so a human can go verify against
+                # P21 right away rather than waiting for the stale sweep.
+                health.record_event(
+                    'order_submission_error',
+                    'Submitting order to P21 failed with an unknown outcome (may or may not have reached P21): ' + str(e),
+                    str(l_order.po_code or '')
+                )
 
         close_db_conn(l_db_conn)
         stop_log('Create New Orders process', l_succ_cnt, l_tot_cnt)
