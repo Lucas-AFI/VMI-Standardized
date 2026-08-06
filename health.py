@@ -114,6 +114,13 @@ def record_event(p_event_type, p_detail=None, p_po_code=None):
                             hour, but this fires immediately so a human isn't
                             waiting on that sweep to find out (see orders()
                             in main.py).
+        'connection_degraded' - items() hit PRICE_CONSECUTIVE_FAILURE_THRESHOLD
+                            connection failures in a row during price sync and
+                            paused to let the connection recover, rather than
+                            burning through the rest of the catalog one
+                            already-doomed call at a time (see items() in
+                            main.py). Informational, not necessarily a failed
+                            run -- items() keeps going afterward.
     p_detail: free-text detail/summary (e.g. the check_order() message)
     p_po_code: related PO code, if applicable
     """

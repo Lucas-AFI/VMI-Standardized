@@ -20,6 +20,17 @@ REQUEST_TIMEOUT = 15          # seconds, per attempt
 RETRY_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = 2      # doubles each attempt: 2s, 4s, 8s
 
+# Price sync only (get_item()) -- deliberately separate from
+# _request_with_retry() above so tuning this for price sync's real-world
+# flaky-connection exposure (many client sites, some with stringent
+# firewalls) can never affect order submission or any other call. Escalating
+# the per-attempt timeout, rather than retrying the same timeout repeatedly,
+# gives a "wifi dropped and is reconnecting" outage a real chance to recover
+# within the retry window instead of just repeating an already-too-short
+# timeout four times.
+PRICE_REQUEST_TIMEOUTS = [15, 20, 25, 30]   # seconds, one per attempt
+PRICE_RETRY_GAP_SECONDS = 2                  # flat pause between attempts
+
 
 def _request_with_retry(method, url, **kwargs):
     """
@@ -39,6 +50,29 @@ def _request_with_retry(method, url, **kwargs):
             log_debug('Request attempt ' + str(l_attempt + 1) + '/' + str(RETRY_ATTEMPTS) + ' failed for ' + url + ': ' + str(e))
             if l_attempt < RETRY_ATTEMPTS - 1:
                 sleep(RETRY_BACKOFF_SECONDS * (2 ** l_attempt))
+    raise l_last_exc
+
+
+def _request_with_escalating_retry(method, url, **kwargs):
+    """
+    Retry wrapper used ONLY by get_item() (price sync) -- see
+    PRICE_REQUEST_TIMEOUTS above for why this is separate from
+    _request_with_retry(). Same non-reinterpretation contract: only
+    protects against the connection never completing, doesn't touch
+    response content/status handling.
+    """
+    l_last_exc = None
+    for l_attempt, l_timeout in enumerate(PRICE_REQUEST_TIMEOUTS):
+        try:
+            return method(url, timeout=l_timeout, **kwargs)
+        except RequestException as e:
+            l_last_exc = e
+            log_debug(
+                'Price request attempt ' + str(l_attempt + 1) + '/' + str(len(PRICE_REQUEST_TIMEOUTS)) +
+                ' failed for ' + url + ' (timeout=' + str(l_timeout) + 's): ' + str(e)
+            )
+            if l_attempt < len(PRICE_REQUEST_TIMEOUTS) - 1:
+                sleep(PRICE_RETRY_GAP_SECONDS)
     raise l_last_exc
 
 
@@ -104,7 +138,7 @@ def get_item(p_item):
         '&saleslocid=' + l_loc +
         '&sourcelocid=' + l_loc
     )
-    l_response = _request_with_retry(requests.get, l_endpoint, headers=l_headers).text
+    l_response = _request_with_escalating_retry(requests.get, l_endpoint, headers=l_headers).text
     try:
         l_dict = xmltodict.parse(l_response)
     except xmltodict.expat.ExpatError:

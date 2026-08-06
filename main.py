@@ -35,12 +35,25 @@ STALE_OPEN_ORDER_DAYS = 3
 ORDER_CONFIRM_ATTEMPTS = 3
 ORDER_CONFIRM_RETRY_DELAY = 5
 
+# Price sync only -- if this many get_item() calls in a row fail on a
+# genuine connection problem (not a routine "item not found"), the
+# connection itself is probably down rather than just having a bad moment.
+# Pause to give it a real chance to recover instead of burning through the
+# rest of the catalog one already-doomed call at a time. Capped per run so a
+# connection that never recovers still finishes in bounded time instead of
+# pausing indefinitely.
+PRICE_CONSECUTIVE_FAILURE_THRESHOLD = 5
+PRICE_PAUSE_SECONDS = 180
+PRICE_MAX_PAUSES_PER_RUN = 3
+
 
 def items():
     # Sync item prices from P21 API to local Matrix database
     l_tot_cnt = 0
     l_succ_cnt = 0
     l_err_cnt = 0
+    l_consecutive_failures = 0
+    l_pauses_used = 0
 
     start_log('Update process')
 
@@ -52,7 +65,38 @@ def items():
         for row in l_rows:
             l_tot_cnt += 1
             log_debug('**** API call for item: ' + row.item_code)
-            l_item = get_item(row.item_code)
+
+            try:
+                l_item = get_item(row.item_code)
+            except Exception as e:
+                # A connection failure here (all of get_item()'s own escalating
+                # retries already exhausted) must never take down the rest of
+                # the catalog -- leave this item's price exactly as it already
+                # is (no update_item() call happens) and let the next run pick
+                # it back up. l_err_cnt already covers "we couldn't confirm
+                # this item's price this run" regardless of the reason.
+                log_error('Price lookup failed for item ' + row.item_code + ' (connection issue, will retry next run): ' + str(e))
+                l_err_cnt += 1
+                l_consecutive_failures += 1
+
+                if l_consecutive_failures >= PRICE_CONSECUTIVE_FAILURE_THRESHOLD and l_pauses_used < PRICE_MAX_PAUSES_PER_RUN:
+                    l_pauses_used += 1
+                    log_error(
+                        str(l_consecutive_failures) + ' consecutive price lookups failed -- pausing ' +
+                        str(PRICE_PAUSE_SECONDS) + 's to let the connection recover (pause ' +
+                        str(l_pauses_used) + '/' + str(PRICE_MAX_PAUSES_PER_RUN) + ' for this run)'
+                    )
+                    health.record_event(
+                        'connection_degraded',
+                        str(l_consecutive_failures) + ' consecutive price lookup failures -- paused ' +
+                        str(PRICE_PAUSE_SECONDS) + 's (pause ' + str(l_pauses_used) + '/' + str(PRICE_MAX_PAUSES_PER_RUN) + ' this run)'
+                    )
+                    sleep(PRICE_PAUSE_SECONDS)
+                    l_consecutive_failures = 0
+
+                continue
+
+            l_consecutive_failures = 0
 
             if 'ResourceError' in l_item.keys():
                 log_error('Item not found in API: ' + row.item_code)
@@ -79,7 +123,16 @@ def items():
         email('Matrix Auto Price Changes for ' + get_customer_name())
         rename_log()
     except Exception:
-        health.record_event('run_failure', traceback.format_exc()[:2000])
+        # Full traceback, not truncated -- goes to app.log (the only durable
+        # local copy; the bare `raise` below propagates the original
+        # exception uncaught, which prints to stderr, not through logging,
+        # so without this log_error() call the full detail existed nowhere
+        # persistent) and to the dashboard event untruncated too, since
+        # NVARCHAR(MAX)/SQLite TEXT have no practical size limit that would
+        # justify cutting it off.
+        l_traceback = traceback.format_exc()
+        log_error('Unhandled exception in items():\n' + l_traceback)
+        health.record_event('run_failure', l_traceback)
         health.record_run('items', 'error', l_succ_cnt, l_tot_cnt, l_err_cnt)
         raise
 
@@ -303,7 +356,9 @@ def orders(p_quote=None):
         email('Matrix Auto Order Submission for ' + get_customer_name())
         rename_log()
     except Exception:
-        health.record_event('run_failure', traceback.format_exc()[:2000])
+        l_traceback = traceback.format_exc()
+        log_error('Unhandled exception in orders():\n' + l_traceback)
+        health.record_event('run_failure', l_traceback)
         health.record_run('orders', 'error', l_succ_cnt, l_tot_cnt)
         raise
 

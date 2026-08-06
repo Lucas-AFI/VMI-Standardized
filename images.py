@@ -105,6 +105,8 @@ def sync_images():
 
         rename_log()
     except Exception:
-        health.record_event('run_failure', traceback.format_exc()[:2000])
+        l_traceback = traceback.format_exc()
+        log_error('Unhandled exception in sync_images():\n' + l_traceback)
+        health.record_event('run_failure', l_traceback)
         health.record_run('images', 'error', l_succ_cnt, l_tot_cnt, l_err_cnt)
         raise
