@@ -6,11 +6,22 @@ from pathlib import Path
 from logging import basicConfig, getLogger, debug, info, warning, error, shutdown, DEBUG, INFO, WARNING, ERROR
 
 l_script_dir = Path(__file__).resolve().parent
-l_log_location = str(l_script_dir / 'logs' / 'app.log')
+l_log_dir = l_script_dir / 'logs'
+l_log_location = str(l_log_dir / 'app.log')  # default; configure_logs() overwrites per-action
 l_log_level = INFO
 
 
-def configure_logs():
+def configure_logs(p_action='app'):
+    #Each action (items/orders/images) gets its own log file, not a shared
+    #one -- Price Sync and Auto Orders are separate scheduled tasks that can
+    #genuinely overlap in wall-clock time (a large catalog can take a while,
+    #especially with the price-sync retry/pause logic), and two processes
+    #sharing one file meant one could crash trying to rename a file the
+    #other still had open (WinError 32), or silently clobber the other's
+    #in-progress content. See utils.py's rename_log()/email(), which read
+    #this value dynamically via the log module rather than a stale copy.
+    global l_log_location
+    l_log_location = str(l_log_dir / ('app_' + p_action + '.log'))
     path = Path(l_log_location)
     path.parent.mkdir(exist_ok=True)
     basicConfig(

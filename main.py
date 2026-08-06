@@ -364,7 +364,6 @@ def orders(p_quote=None):
 
 
 def main():
-    configure_logs()
     parser = ArgumentParser(description='VMI Update Process')
     actions = ['items', 'orders', 'images']
     levels = ['debug', 'info', 'warn', 'error']
@@ -373,6 +372,10 @@ def main():
     parser.add_argument('-q', '--quote', action='store_true')
     args = parser.parse_args()
 
+    # Each action gets its own log file (app_items.log/app_orders.log/
+    # app_images.log) -- see configure_logs() in log.py for why this can't
+    # be a single shared app.log.
+    configure_logs(args.action.lower())
     set_level(args.level.upper())
 
     if args.action.lower() == 'orders':

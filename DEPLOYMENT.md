@@ -137,7 +137,9 @@ python matrix_image_save.py          # item image sync (only if [images] is conf
                                       # is the equivalent, useful for -l debug verbosity
 ```
 
-- Check `logs/app.log` for errors.
+- Check `logs/app_items.log` / `logs/app_orders.log` / `logs/app_images.log` for errors -- each
+  action logs to its own file (not a shared `app.log`), specifically so Price Sync and Auto Orders
+  can never collide if one is still running when the other's scheduled task fires.
 - Confirm the email notification actually arrives (via SendGrid).
 - If testing image sync, confirm `.jpg` files actually landed in the configured `local_folder`.
 - Manually run `python health_reporter.py`, then check

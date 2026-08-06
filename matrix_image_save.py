@@ -21,5 +21,5 @@ from log import configure_logs
 from images import sync_images
 
 if __name__ == '__main__':
-    configure_logs()
+    configure_logs('images')
     sync_images()

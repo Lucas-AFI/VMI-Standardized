@@ -9,7 +9,8 @@ from os import path, rename
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-from log import l_log_location, log_debug, log_error
+import log
+from log import log_debug, log_error
 from datetime import datetime
 from time import sleep
 from config import get_email_to, get_email_cc, get_contract_id
@@ -102,7 +103,7 @@ def get_contract():
 def rename_log():
     """Rename log file with timestamp to preserve history"""
     l_timestamp = datetime.now().strftime('%Y_%m_%d_%H%M%S')
-    rename(l_log_location, l_log_location[:-4] + '_' + l_timestamp + '.log')
+    rename(log.l_log_location, log.l_log_location[:-4] + '_' + l_timestamp + '.log')
 
 
 def _is_retryable_smtp_error(p_exc):
@@ -188,11 +189,11 @@ def email(p_subject, p_message="", p_log=True, p_attach=True):
         msg['Cc'] = ','.join(l_cc)
 
     if p_log:
-        with open(l_log_location, 'r') as f:
+        with open(log.l_log_location, 'r') as f:
             mess = f.read()
         if p_attach:
-            part = MIMEApplication(mess, Name=path.basename(l_log_location))
-            part['Content-Disposition'] = 'attachment; filename="%s"' % path.basename(l_log_location)
+            part = MIMEApplication(mess, Name=path.basename(log.l_log_location))
+            part['Content-Disposition'] = 'attachment; filename="%s"' % path.basename(log.l_log_location)
         else:
             part = MIMEText(mess)
         msg.attach(part)
