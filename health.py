@@ -13,6 +13,7 @@ Local file: health_state.db (SQLite, same folder as the script; gitignored
 alongside config.ini since its content is machine-specific and ephemeral).
 """
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,18 +68,20 @@ def _connect():
             last_status TEXT NOT NULL,
             succ_cnt INTEGER,
             tot_cnt INTEGER,
-            err_cnt INTEGER
+            err_cnt INTEGER,
+            err_items TEXT
         )
         """
     )
-    try:
-        # health_state.db already exists on ~150 client machines from before
-        # err_cnt was added -- CREATE TABLE IF NOT EXISTS above won't alter an
-        # existing table, so patch it in here. Fails harmlessly (caught below)
-        # once the column is already present.
-        l_conn.execute('ALTER TABLE run_log ADD COLUMN err_cnt INTEGER')
-    except sqlite3.OperationalError:
-        pass
+    for l_column in ('err_cnt INTEGER', 'err_items TEXT'):
+        try:
+            # health_state.db already exists on ~150 client machines from
+            # before these columns were added -- CREATE TABLE IF NOT EXISTS
+            # above won't alter an existing table, so patch them in here.
+            # Fails harmlessly (caught below) once a column is already present.
+            l_conn.execute('ALTER TABLE run_log ADD COLUMN ' + l_column)
+        except sqlite3.OperationalError:
+            pass
     return l_conn
 
 
@@ -121,6 +124,13 @@ def record_event(p_event_type, p_detail=None, p_po_code=None):
                             already-doomed call at a time (see items() in
                             main.py). Informational, not necessarily a failed
                             run -- items() keeps going afterward.
+        'order_submitted' - an order was successfully created in P21 (and,
+                            if applicable, confirmed via confirm_order_created())
+                            -- fires for both a clean success and a partial
+                            order (which also separately fires partial_order
+                            for the item-drop diagnostic detail). Informational,
+                            not an error; lets the dashboard list recent order
+                            numbers per client.
     p_detail: free-text detail/summary (e.g. the check_order() message)
     p_po_code: related PO code, if applicable
     """
@@ -162,7 +172,7 @@ def event_already_recorded(p_event_type, p_po_code):
         return False
 
 
-def record_run(p_run_type, p_status, p_succ_cnt=None, p_tot_cnt=None, p_err_cnt=None):
+def record_run(p_run_type, p_status, p_succ_cnt=None, p_tot_cnt=None, p_err_cnt=None, p_err_items=None):
     """
     Record that a run of 'items' or 'orders' completed, and how it went.
     p_status: 'success' or 'error'
@@ -170,16 +180,24 @@ def record_run(p_run_type, p_status, p_succ_cnt=None, p_tot_cnt=None, p_err_cnt=
                items() SKUs P21 returned a ResourceError for) -- distinct
                from p_succ_cnt/p_tot_cnt, which track updates applied vs.
                rows considered.
+    p_err_items: list of the specific item codes that made up p_err_cnt this
+                 run (items() only), stored as JSON -- lets the dashboard show
+                 which SKUs are currently erroring, not just a bare count.
+                 Whatever isn't in this list on the next report is treated as
+                 resolved (see health_reporter.py/intake()'s sync logic), so
+                 this should always be the full current set, not a delta.
     """
     try:
         l_conn = _connect()
         l_conn.execute(
-            'INSERT INTO run_log (run_type, last_run_at, last_status, succ_cnt, tot_cnt, err_cnt) '
-            'VALUES (?, ?, ?, ?, ?, ?) '
+            'INSERT INTO run_log (run_type, last_run_at, last_status, succ_cnt, tot_cnt, err_cnt, err_items) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?) '
             'ON CONFLICT(run_type) DO UPDATE SET '
             'last_run_at=excluded.last_run_at, last_status=excluded.last_status, '
-            'succ_cnt=excluded.succ_cnt, tot_cnt=excluded.tot_cnt, err_cnt=excluded.err_cnt',
-            (p_run_type, _now(), p_status, p_succ_cnt, p_tot_cnt, p_err_cnt)
+            'succ_cnt=excluded.succ_cnt, tot_cnt=excluded.tot_cnt, err_cnt=excluded.err_cnt, '
+            'err_items=excluded.err_items',
+            (p_run_type, _now(), p_status, p_succ_cnt, p_tot_cnt, p_err_cnt,
+             json.dumps(p_err_items) if p_err_items is not None else None)
         )
         l_conn.commit()
         l_conn.close()

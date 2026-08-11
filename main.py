@@ -52,6 +52,7 @@ def items():
     l_tot_cnt = 0
     l_succ_cnt = 0
     l_err_cnt = 0
+    l_err_items = []
     l_consecutive_failures = 0
     l_pauses_used = 0
 
@@ -77,6 +78,7 @@ def items():
                 # this item's price this run" regardless of the reason.
                 log_error('Price lookup failed for item ' + row.item_code + ' (connection issue, will retry next run): ' + str(e))
                 l_err_cnt += 1
+                l_err_items.append(row.item_code)
                 l_consecutive_failures += 1
 
                 if l_consecutive_failures >= PRICE_CONSECUTIVE_FAILURE_THRESHOLD and l_pauses_used < PRICE_MAX_PAUSES_PER_RUN:
@@ -101,6 +103,7 @@ def items():
             if 'ResourceError' in l_item.keys():
                 log_error('Item not found in API: ' + row.item_code)
                 l_err_cnt += 1
+                l_err_items.append(row.item_code)
             else:
                 l_new_price = '{:.4f}'.format(float(l_item['ItemPrice']['UnitPrice']))
                 l_old_price = coalesce(row.item_price)
@@ -118,7 +121,7 @@ def items():
         close_db_conn(l_db_conn)
         stop_log('Update process', l_succ_cnt, l_tot_cnt)
 
-        health.record_run('items', 'success', l_succ_cnt, l_tot_cnt, l_err_cnt)
+        health.record_run('items', 'success', l_succ_cnt, l_tot_cnt, l_err_cnt, l_err_items)
 
         email('Matrix Auto Price Changes for ' + get_customer_name())
         rename_log()
@@ -133,7 +136,7 @@ def items():
         l_traceback = traceback.format_exc()
         log_error('Unhandled exception in items():\n' + l_traceback)
         health.record_event('run_failure', l_traceback)
-        health.record_run('items', 'error', l_succ_cnt, l_tot_cnt, l_err_cnt)
+        health.record_run('items', 'error', l_succ_cnt, l_tot_cnt, l_err_cnt, l_err_items)
         raise
 
 
@@ -330,6 +333,11 @@ def orders(p_quote=None):
                     clear_inflight(l_cursor, l_order.po_key)
                     if not p_quote:
                         record_open_order(l_cursor, l_order.po_key, str(l_order.po_code or ''), l_order_no)
+                    health.record_event(
+                        'order_submitted',
+                        'OrderNo ' + l_order_no + ' created for po_code = ' + str(l_order.po_code or ''),
+                        str(l_order.po_code or '')
+                    )
                     l_succ_cnt += 1
 
             except Exception as e:
