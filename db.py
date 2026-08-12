@@ -189,6 +189,25 @@ def clear_inflight(l_cursor, l_key):
         controlled_exit('FATAL: ' + str(e))
 
 
+def clear_stale_by_po_code(l_cursor, p_po_code):
+    #Manually clear a stuck erp_send_state row by po_code -- for
+    #`python main.py -a clear_stale --po-code ...`, used after a human has
+    #independently verified with P21 whether the order actually went
+    #through. Never touches send_erp or P21 itself; purely stops local/
+    #dashboard tracking of this PO as stuck (see get_stale_inflight() below
+    #and get_stale_pending_orders() in health_reporter.py, which both read
+    #this same table).
+    try:
+        l_cursor.execute(
+            'delete from dbo.erp_send_state '
+            'where po_key in (select po_key from dbo.ent_po_headers where po_code = ?)',
+            p_po_code
+        )
+        return l_cursor.rowcount
+    except Error as e:
+        controlled_exit('FATAL: ' + str(e))
+
+
 def get_stale_inflight(l_cursor):
     #Flag orders that have been marked in-flight for over an hour -- almost
     #certainly a crash or lost connection mid-submission that needs a human

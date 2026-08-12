@@ -2,11 +2,12 @@
 VMI Update Process - Main Entry Point
 
 Usage:
-    python main.py                  # Price sync (default)
-    python main.py -a orders        # Auto order submission
-    python main.py -a orders -q     # Submit as quotes
-    python main.py -a images        # Item image sync
-    python main.py -l debug         # Enable debug logging
+    python main.py                              # Price sync (default)
+    python main.py -a orders                    # Auto order submission
+    python main.py -a orders -q                 # Submit as quotes
+    python main.py -a images                    # Item image sync
+    python main.py -a clear_stale --po-code 1361 # Clear a stuck erp_send_state row
+    python main.py -l debug                     # Enable debug logging
 """
 
 from argparse import ArgumentParser
@@ -15,7 +16,7 @@ from time import sleep
 import traceback
 from log import configure_logs, log_debug, log_info, log_error, start_log, stop_log, log_shutdown, set_level
 from utils import coalesce, email, rename_log, check_order, get_contract, classify_dropped_item
-from db import connect_db, close_db_conn, get_items, update_item, get_orders, get_order_items, update_order, mark_inflight, clear_inflight, get_stale_inflight, record_open_order, get_open_orders, clear_open_order
+from db import connect_db, close_db_conn, get_items, update_item, get_orders, get_order_items, update_order, mark_inflight, clear_inflight, get_stale_inflight, record_open_order, get_open_orders, clear_open_order, clear_stale_by_po_code
 from api import get_item, get_customer_name, create_order, approve_order, check_item_availability, get_order_status
 from xml_processor import build_order, add_line_item, print_xml
 from images import sync_images
@@ -371,14 +372,40 @@ def orders(p_quote=None):
         raise
 
 
+def clear_stale_order(p_po_code):
+    # Manual admin action: stop tracking a PO as stuck in-flight, after a
+    # human has independently verified with P21 whether it actually went
+    # through (see get_stale_inflight()/get_stale_pending_orders()). Only
+    # ever deletes the erp_send_state row -- never touches send_erp, never
+    # calls P21, never resubmits anything. The dashboard's "stale pending
+    # order(s)" count is re-derived live from erp_send_state every report,
+    # so this takes effect on the very next heartbeat with no other action
+    # needed.
+    l_db_conn = connect_db()
+    l_cursor = l_db_conn.cursor()
+    l_cleared = clear_stale_by_po_code(l_cursor, p_po_code)
+    close_db_conn(l_db_conn)
+
+    if l_cleared:
+        l_message = 'Cleared erp_send_state tracking for po_code ' + p_po_code + ' (' + str(l_cleared) + ' row(s)).'
+    else:
+        l_message = 'No erp_send_state row found for po_code ' + p_po_code + ' -- nothing to clear.'
+    log_info(l_message)
+    print(l_message)
+
+
 def main():
     parser = ArgumentParser(description='VMI Update Process')
-    actions = ['items', 'orders', 'images']
+    actions = ['items', 'orders', 'images', 'clear_stale']
     levels = ['debug', 'info', 'warn', 'error']
     parser.add_argument('-a', choices=actions, default='items', dest='action')
     parser.add_argument('-l', choices=levels, default='info', dest='level')
     parser.add_argument('-q', '--quote', action='store_true')
+    parser.add_argument('--po-code', dest='po_code', help='PO code to clear from erp_send_state tracking (used with -a clear_stale)')
     args = parser.parse_args()
+
+    if args.action.lower() == 'clear_stale' and not args.po_code:
+        parser.error('-a clear_stale requires --po-code <code>')
 
     # Each action gets its own log file (app_items.log/app_orders.log/
     # app_images.log) -- see configure_logs() in log.py for why this can't
@@ -392,6 +419,8 @@ def main():
         sync_images()
     elif args.action.lower() == 'items':
         items()
+    elif args.action.lower() == 'clear_stale':
+        clear_stale_order(args.po_code)
 
 
 if __name__ == "__main__":
