@@ -20,6 +20,16 @@ REQUEST_TIMEOUT = 15          # seconds, per attempt
 RETRY_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = 2      # doubles each attempt: 2s, 4s, 8s
 
+# create_order()/approve_order() only, via _request_once() below -- kept
+# separate from REQUEST_TIMEOUT so tuning this can never affect
+# get_token()/get_customer_name()/check_item_availability()/get_order_status(),
+# same isolation reasoning as PRICE_REQUEST_TIMEOUTS. Bumped from 15s after
+# two "Read timed out. (read timeout=15)" failures on create_order() within
+# a day across two machines -- 15s wasn't enough margin for P21's real-world
+# response time on order creation specifically. Single attempt either way
+# (see _request_once()'s docstring for why this never retries).
+ORDER_REQUEST_TIMEOUT = 30    # seconds, single attempt
+
 # Price sync only (get_item()) -- deliberately separate from
 # _request_with_retry() above so tuning this for price sync's real-world
 # flaky-connection exposure (many client sites, some with stringent
@@ -99,7 +109,7 @@ def _request_once(method, url, **kwargs):
     the state get_stale_inflight() exists to catch and flag for a human,
     *before* a duplicate can be created rather than after.
     """
-    return method(url, timeout=REQUEST_TIMEOUT, **kwargs)
+    return method(url, timeout=ORDER_REQUEST_TIMEOUT, **kwargs)
 
 
 def get_token():
