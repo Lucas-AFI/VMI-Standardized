@@ -13,6 +13,7 @@ import log
 from log import log_debug, log_error
 from datetime import datetime
 from time import sleep
+from collections import Counter
 from config import get_email_to, get_email_cc, get_contract_id
 import credentials
 import health
@@ -29,7 +30,10 @@ def check_order(p_dict, p_item_list):
     Validate P21 order response and determine status.
     Returns: (status, order_no_or_reason, message, dropped_item_ids)
       - 'success' : all items accepted
-      - 'partial' : order created but some items were dropped (Delete=Y)
+      - 'partial' : order created but some items were dropped -- either P21
+                    returned the line with Delete='Y', or P21 left the line
+                    out of its response entirely with no Delete flag at all
+                    (see incident note below)
       - 'error'   : order was not created
     dropped_item_ids is always a list; only non-empty when status == 'partial'.
     """
@@ -43,25 +47,36 @@ def check_order(p_dict, p_item_list):
             return 'error', l_full_error, l_full_error, []
 
     l_items = p_dict['Order']['Lines']['OrderLine']
+    if type(l_items) is dict:
+        l_items = [l_items]
+
+    l_order_no = p_dict['Order']['OrderNo']
     l_message = ""
     l_dropped_ids = []
 
-    if type(l_items) is dict:
-        if l_items['Delete'] == 'Y':
-            l_message = 'OrderNo: ' + p_dict['Order']['OrderNo'] + '\nItemId: ' + l_items['ItemId'] + ' is not available to purchase\n'
-            l_dropped_ids = [l_items['ItemId']]
-    else:
-        if any(d['Delete'] == 'Y' for d in l_items):
-            l_message = 'OrderNo: ' + p_dict['Order']['OrderNo'] + '\n'
-            for item in l_items:
-                if item['Delete'] == 'Y':
-                    l_message += 'ItemId: ' + item['ItemId'] + ' is not available to purchase\n'
-                    l_dropped_ids.append(item['ItemId'])
+    for item in l_items:
+        if item.get('Delete') == 'Y':
+            l_message += 'ItemId: ' + item['ItemId'] + ' is not available to purchase\n'
+            l_dropped_ids.append(item['ItemId'])
+
+    # Incident, 2026-08-18: po_code 1014 submitted 5 lines; P21's response
+    # came back with only 4 OrderLine entries and no Delete='Y' anywhere, so
+    # the loop above saw nothing wrong and this returned 'success' with the
+    # 5th item (TCH05350-08) silently missing from the order. Compare against
+    # what was actually submitted (p_item_list) so a line P21 drops without
+    # flagging it is caught the same as one it flags explicitly.
+    l_response_counts = Counter(item['ItemId'] for item in l_items if 'ItemId' in item)
+    l_submitted_counts = Counter(p_item_list)
+    for l_item_id, l_submitted_count in l_submitted_counts.items():
+        l_missing_count = l_submitted_count - l_response_counts.get(l_item_id, 0)
+        for _ in range(max(l_missing_count, 0)):
+            l_message += 'ItemId: ' + l_item_id + ' was silently omitted from P21\'s response (no Delete flag, just absent)\n'
+            l_dropped_ids.append(l_item_id)
 
     if l_message == "":
-        return 'success', p_dict['Order']['OrderNo'], l_message, l_dropped_ids
+        return 'success', l_order_no, l_message, l_dropped_ids
     else:
-        return 'partial', p_dict['Order']['OrderNo'], l_message, l_dropped_ids
+        return 'partial', l_order_no, 'OrderNo: ' + l_order_no + '\n' + l_message, l_dropped_ids
 
 
 def classify_dropped_item(p_availability):

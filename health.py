@@ -117,6 +117,18 @@ def record_event(p_event_type, p_detail=None, p_po_code=None):
                             hour, but this fires immediately so a human isn't
                             waiting on that sweep to find out (see orders()
                             in main.py).
+        'order_build_error' - get_order_items()/add_line_item() raised
+                            unexpectedly before anything was submitted to
+                            P21 (e.g. a query/connection hiccup). Nothing was
+                            sent to P21 for this PO; send_erp is untouched,
+                            so it retries next run. Does NOT cover a PO
+                            detail line whose item_key doesn't resolve in
+                            ENT_ITEM_MASTER -- that's excluded and logged by
+                            get_order_items() itself (not raised, not an
+                            event here) so the order still ships with its
+                            remaining valid line(s) instead of being held
+                            back and retried indefinitely (see orders() in
+                            main.py).
         'connection_degraded' - items() hit PRICE_CONSECUTIVE_FAILURE_THRESHOLD
                             connection failures in a row during price sync and
                             paused to let the connection recover, rather than

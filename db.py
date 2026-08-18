@@ -118,17 +118,36 @@ def get_orders(l_cursor):
 
 
 def get_order_items(l_cursor, l_key):
-    #Fetch line items for a specific purchase order
+    #Fetch line items for a specific purchase order.
+    #LEFT JOIN (not inner) so a po_detail row whose item_key no longer
+    #resolves in ENT_ITEM_MASTER still comes back -- with item_code NULL --
+    #instead of silently disappearing from the result set. Any such row is
+    #excluded from what's returned (same as the old inner join would do),
+    #but now it's logged first instead of vanishing with zero trace. This
+    #is a data problem, not a transient one -- it won't resolve itself on
+    #retry, so it deliberately does NOT raise: the order still gets built
+    #and submitted with its remaining valid line(s) rather than being held
+    #back and re-attempted (and re-logged) every run.
     try:
         l_cursor.execute(
-            'select po_key, po_line_no, item_code, item_description, qty, unit_price '
-            'from ENT_PO_DETAILS '
-            'join ENT_ITEM_MASTER on ENT_PO_DETAILS.item_key = ENT_ITEM_MASTER.ITEM_KEY '
-            'where po_key = ' + str(l_key)
+            'select d.po_key, d.po_line_no, m.item_code, m.item_description, d.qty, d.unit_price '
+            'from ENT_PO_DETAILS d '
+            'left join ENT_ITEM_MASTER m on d.item_key = m.ITEM_KEY '
+            'where d.po_key = ' + str(l_key)
         )
     except Error as e:
         controlled_exit('FATAL: ' + str(e))
-    return l_cursor.fetchall()
+    l_rows = l_cursor.fetchall()
+
+    l_orphaned = [str(r.po_line_no) for r in l_rows if r.item_code is None]
+    if l_orphaned:
+        log_error(
+            'PO ' + str(l_key) + ' has line(s) referencing an item_key with no matching '
+            'ENT_ITEM_MASTER record -- po_line_no(s): ' + ', '.join(l_orphaned) +
+            ' -- excluded from the order submitted to P21.'
+        )
+
+    return [r for r in l_rows if r.item_code is not None]
 
 
 def update_item(l_cursor, l_key, l_code, l_new_price, l_old_price):

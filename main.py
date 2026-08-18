@@ -269,7 +269,16 @@ def orders(p_quote=None):
                 l_order_items = get_order_items(l_cursor, l_order.po_key)
                 l_xml, l_item_ids = add_line_item(l_xml, l_order_items)
             except Exception as e:
-                log_error('Building XML document failed:\n' + str(e))
+                log_error('Building XML document failed for po_code = ' + str(l_order.po_code or '') + ':\n' + str(e))
+                email(
+                    'Matrix Auto Order ALERT - Order Build Failed for ' + get_customer_name(),
+                    'Building the order XML for po_code = ' + str(l_order.po_code or '') + ' (po_key = ' +
+                    str(l_order.po_key) + ') failed, so this order was NOT submitted to P21:\n\n' + str(e) +
+                    '\n\nThis PO will be retried automatically on the next run. If the cause is a data '
+                    'issue (e.g. an orphaned item_key), it will keep failing until that is corrected.',
+                    False
+                )
+                health.record_event('order_build_error', str(e), str(l_order.po_code or ''))
                 continue
 
             mark_inflight(l_cursor, l_order.po_key)
