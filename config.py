@@ -69,6 +69,12 @@ def get_email_cc():
     raw = _get('email', 'email_cc', fallback='')
     return [addr.strip() for addr in raw.split(',') if addr.strip()]
 
+def get_email_sales_cc():
+    # Cc'd only on order-related emails (see email()'s p_sales_cc param in
+    # utils.py) -- never on pricing/error reports, unlike email_cc above.
+    raw = _get('email', 'email_sales_cc', fallback='')
+    return [addr.strip() for addr in raw.split(',') if addr.strip()]
+
 
 # Images
 
@@ -86,3 +92,10 @@ def get_health_client_name():
 
 def get_health_endpoint_url():
     return _get('health', 'endpoint_url', required=True)
+
+def get_catalog_endpoint_url():
+    # Only required=True at call time (i.e. only when `-a catalog` actually
+    # runs) -- same as get_image_base_url() only mattering to machines
+    # running Item Image Sync. Machines not yet running catalog sync are
+    # unaffected by this being unset.
+    return _get('health', 'catalog_endpoint_url', required=True)

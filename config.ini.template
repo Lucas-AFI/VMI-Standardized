@@ -13,6 +13,7 @@ po_prefix =
 [email]
 email_to = VMI@afi-tools.com
 email_cc =
+email_sales_cc =
 
 [images]
 base_url =

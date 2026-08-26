@@ -14,7 +14,7 @@ from log import log_debug, log_error
 from datetime import datetime
 from time import sleep
 from collections import Counter
-from config import get_email_to, get_email_cc, get_contract_id
+from config import get_email_to, get_email_cc, get_email_sales_cc, get_contract_id
 import credentials
 import health
 
@@ -169,15 +169,20 @@ def _send_email_with_retry(p_msg, p_all_recip):
     raise l_last_exc
 
 
-def email(p_subject, p_message="", p_log=True, p_attach=True):
+def email(p_subject, p_message="", p_log=True, p_attach=True, p_sales_cc=False):
     """
     Send email notification with optional log file attachment.
 
     Args:
-        p_subject : email subject line
-        p_message : email body (used when p_log=False)
-        p_log     : if True, attach/embed the log file
-        p_attach  : if True, attach log as file; if False, embed in body
+        p_subject  : email subject line
+        p_message  : email body (used when p_log=False)
+        p_log      : if True, attach/embed the log file
+        p_attach   : if True, attach log as file; if False, embed in body
+        p_sales_cc : if True, also Cc email_sales_cc (config.ini [email]) on
+                     top of the regular email_cc. Sales only wants visibility
+                     into order-related emails, not pricing/error reports --
+                     callers in orders() pass True; items()/db.py's
+                     controlled_exit() leave this False.
 
     Never raises. Retries transient connection failures; on total failure
     (retries exhausted, or a non-retryable rejection like bad auth or a
@@ -193,7 +198,7 @@ def email(p_subject, p_message="", p_log=True, p_attach=True):
     because the *notification* about it failed.
     """
     l_to = get_email_to()
-    l_cc = get_email_cc()
+    l_cc = get_email_cc() + (get_email_sales_cc() if p_sales_cc else [])
     l_all_recip = l_to + l_cc
 
     msg = MIMEMultipart()

@@ -100,6 +100,7 @@ def collect():
     print('--- Email ---')
     email_to = prompt('Email To', 'VMI@afi-tools.com')
     email_cc = prompt('Email CC (optional, press Enter to skip)', '')
+    email_sales_cc = prompt('Sales Email CC -- order emails only, not pricing/error reports (optional, press Enter to skip)', '')
 
     # Images
     print()
@@ -151,6 +152,7 @@ def collect():
     config['email'] = {
         'email_to': email_to,
         'email_cc': email_cc,
+        'email_sales_cc': email_sales_cc,
     }
 
     config['images'] = {
@@ -204,6 +206,7 @@ def collect():
     print(f'  PO Prefix      : {po_prefix or "(not set)"}')
     print(f'  Email To       : {email_to}')
     print(f'  Email CC       : {email_cc or "(not set)"}')
+    print(f'  Sales Email CC : {email_sales_cc or "(not set)"}')
     print(f'  Image Base URL : {image_base_url}')
     print(f'  Image Folder   : {local_image_folder}')
     print(f'  Health Client  : {health_client_name}')

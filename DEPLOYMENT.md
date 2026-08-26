@@ -81,7 +81,8 @@ It will prompt for:
 | Field | config.ini key | Notes |
 |---|---|---|
 | Email To | `[email] email_to` | Comma-separated. Default `VMI@afi-tools.com` |
-| Email CC | `[email] email_cc` | Optional, comma-separated |
+| Email CC | `[email] email_cc` | Optional, comma-separated. Cc'd on every email |
+| Sales Email CC | `[email] email_sales_cc` | Optional, comma-separated. Cc'd only on order-related emails (Auto Orders) -- never pricing/error reports |
 
 **Item Images** (only required if this machine will run Item Image Sync)
 | Field | config.ini key | Notes |
