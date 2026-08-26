@@ -95,6 +95,7 @@ It will prompt for:
 |---|---|---|
 | Health Dashboard Client Name | `[health] client_name` | Must exactly match (case-sensitive) the name provisioned server-side — see below |
 | Health Dashboard Endpoint URL | `[health] endpoint_url` | e.g. `https://<app-name>.azurewebsites.net/health/intake` |
+| Catalog Sync Endpoint URL | `[health] catalog_endpoint_url` | Optional — only required if this machine will run Catalog Sync (`main.py -a catalog`). e.g. `https://<app-name>.azurewebsites.net/health/catalog_intake` |
 
 **Credentials** (Windows Credential Manager only — never written to
 `config.ini`, never committed):
@@ -136,27 +137,31 @@ python main.py -a orders -l debug    # order submission, verbose logging
 python matrix_image_save.py          # item image sync (only if [images] is configured) -- this is
                                       # what's actually scheduled on machines; `main.py -a images`
                                       # is the equivalent, useful for -l debug verbosity
+python main.py -a catalog -l debug   # catalog sync (only if [health] catalog_endpoint_url is configured)
 ```
 
-- Check `logs/app_items.log` / `logs/app_orders.log` / `logs/app_images.log` for errors -- each
-  action logs to its own file (not a shared `app.log`), specifically so Price Sync and Auto Orders
-  can never collide if one is still running when the other's scheduled task fires.
+- Check `logs/app_items.log` / `logs/app_orders.log` / `logs/app_images.log` / `logs/app_catalog.log`
+  for errors -- each action logs to its own file (not a shared `app.log`), specifically so these
+  actions can never collide if one is still running when another's scheduled task fires.
 - Confirm the email notification actually arrives (via SendGrid).
 - If testing image sync, confirm `.jpg` files actually landed in the configured `local_folder`.
+- If testing catalog sync, confirm the client's item count shows up correctly on the dashboard side.
 - Manually run `python health_reporter.py`, then check
   `logs/health_reporter.log` and confirm this client shows up at the
   dashboard's `/health/dashboard` page.
 
 ## 6. Configure Task Scheduler
 
-Five scheduled tasks total (four if this machine isn't running Item Image Sync). All run the same
-Python interpreter used above, with **Start in** set to `C:\update_process`:
+Six scheduled tasks total (five if this machine isn't running Item Image Sync, four if it's also
+not running Catalog Sync). All run the same Python interpreter used above, with **Start in** set
+to `C:\update_process`:
 
 | Task | Command | Frequency | Notes |
 |---|---|---|---|
 | VMI Price Sync | `python main.py` | *(match the interval already used on other client machines — not fixed anywhere in this repo; confirm against a reference machine)* | |
 | VMI Auto Orders | `python main.py -a orders` | *(runs within a bounded window per day on existing machines — confirm the exact interval the same way)* | |
 | VMI Item Image Sync | `python matrix_image_save.py` (no arguments) | *(images change rarely — daily is a reasonable default; confirm against a reference machine if one exists)* | Optional — only add if `[images]` is configured in `config.ini`. This matches the pre-existing Task Scheduler convention already used across the client fleet (Program: `python`, Arguments: `matrix_image_save.py`) — use it for every machine, new or existing, so the config stays identical everywhere. `main.py -a images` is equivalent if you'd rather match the other two actions' CLI. |
+| VMI Catalog Sync | `python main.py -a catalog` | Daily | Optional — only add if `[health] catalog_endpoint_url` is configured in `config.ini`. Catalog data (price, description, type) changes infrequently, so daily is a reasonable default — separate cadence from the 15-minute health heartbeat is the point of this being its own action. |
 | VMI Health Reporter | `python health_reporter.py` | Every 15 minutes, indefinitely | **Own, independent** Task Scheduler entry — must keep running even if the tasks above hang or crash. Run whether user is logged on or not: **Yes** |
 | VMI Script Updates | `update_scripts.bat` | Monthly | Pulls the latest code via `git pull` |
 Steps for this one: 
@@ -178,8 +183,9 @@ Steps for this one:
 - [ ] `config.ini` fully filled in; `collect_config.py --verify` passes
 - [ ] Manual run of both `main.py` order/price actions succeeded and the email notification arrived
 - [ ] If running Item Image Sync: manual `matrix_image_save.py` run succeeded and `.jpg` files landed in `local_folder`
+- [ ] If running Catalog Sync: manual `main.py -a catalog` run succeeded and this client's item count shows up correctly on the dashboard side
 - [ ] Manual run of `health_reporter.py` succeeded and this client is visible on the dashboard
-- [ ] All Task Scheduler entries (four, or five with Item Image Sync) are created, pointed at `C:\update_process`, and `health_reporter.py`'s is set to run whether logged on or not
+- [ ] All Task Scheduler entries (four, up to six with Item Image Sync and/or Catalog Sync) are created, pointed at `C:\update_process`, and `health_reporter.py`'s is set to run whether logged on or not
 - [ ] `logs/` is being written to and rotated correctly (see `rename_log()` in `utils.py`)
 
 ---

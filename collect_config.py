@@ -113,6 +113,7 @@ def collect():
     print('--- Health Reporter ---')
     health_client_name = prompt('Health Dashboard Client Name (e.g. "American Torch Tip")')
     health_endpoint_url = prompt('Health Dashboard Endpoint URL')
+    catalog_endpoint_url = prompt('Catalog Sync Endpoint URL -- only needed if this machine will run Catalog Sync (optional, press Enter to skip)', '')
 
     # Validate required fields
     missing = []
@@ -163,6 +164,7 @@ def collect():
     config['health'] = {
         'client_name': health_client_name,
         'endpoint_url': health_endpoint_url,
+        'catalog_endpoint_url': catalog_endpoint_url,
     }
 
     with open(CONFIG_PATH, 'w') as f:
@@ -211,6 +213,7 @@ def collect():
     print(f'  Image Folder   : {local_image_folder}')
     print(f'  Health Client  : {health_client_name}')
     print(f'  Health Endpoint: {health_endpoint_url}')
+    print(f'  Catalog Endpoint: {catalog_endpoint_url or "(not set)"}')
     print(f'  API/SMTP Creds : stored in Credential Manager')
     print()
     print('You can verify credentials anytime with: python collect_config.py --verify')

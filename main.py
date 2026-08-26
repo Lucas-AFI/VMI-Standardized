@@ -6,6 +6,7 @@ Usage:
     python main.py -a orders                    # Auto order submission
     python main.py -a orders -q                 # Submit as quotes
     python main.py -a images                    # Item image sync
+    python main.py -a catalog                   # Push item catalog to health dashboard
     python main.py -a clear_stale --po-code 1361 # Clear a stuck erp_send_state row
     python main.py -l debug                     # Enable debug logging
 """
@@ -20,6 +21,7 @@ from db import connect_db, close_db_conn, get_items, update_item, get_orders, ge
 from api import get_item, get_customer_name, create_order, approve_order, check_item_availability, get_order_status
 from xml_processor import build_order, add_line_item, print_xml
 from images import sync_images
+from catalog import sync_catalog
 import health
 
 # Threshold for flagging a P21 order that's sat open (not yet Completed/
@@ -238,7 +240,8 @@ def orders(p_quote=None):
                 'automatically resubmitted:\n' + l_stale_pos +
                 '\n\nManually verify in P21 whether these orders were created, then either delete '
                 'the erp_send_state row (if not actually sent) or set send_erp = 1 (if sent) as appropriate.',
-                False
+                False,
+                p_sales_cc=True
             )
             for l_stale_row in l_stale:
                 if not health.event_already_recorded('stale_inflight_order', str(l_stale_row.po_key)):
@@ -276,7 +279,8 @@ def orders(p_quote=None):
                     str(l_order.po_key) + ') failed, so this order was NOT submitted to P21:\n\n' + str(e) +
                     '\n\nThis PO will be retried automatically on the next run. If the cause is a data '
                     'issue (e.g. an orphaned item_key), it will keep failing until that is corrected.',
-                    False
+                    False,
+                    p_sales_cc=True
                 )
                 health.record_event('order_build_error', str(e), str(l_order.po_code or ''))
                 continue
@@ -289,7 +293,7 @@ def orders(p_quote=None):
 
                 if l_status == 'error':
                     log_error('Submitting order to API failed: order not created. Reason: ' + l_response + '. po_code = ' + str(l_order.po_code or ''))
-                    email('Matrix Auto Order Error for ' + get_customer_name(), 'Order not created because: ' + l_response + '\npo_code = ' + str(l_order.po_code or ''), False)
+                    email('Matrix Auto Order Error for ' + get_customer_name(), 'Order not created because: ' + l_response + '\npo_code = ' + str(l_order.po_code or ''), False, p_sales_cc=True)
                     health.record_event('order_error', l_message, str(l_order.po_code or ''))
                     clear_inflight(l_cursor, l_order.po_key)
 
@@ -309,7 +313,8 @@ def orders(p_quote=None):
                             '\n\nManually verify in P21 whether this order exists, then either delete the '
                             'erp_send_state row (if not actually sent) or set send_erp = 1 (if it did go '
                             'through) as appropriate.',
-                            False
+                            False,
+                            p_sales_cc=True
                         )
                         health.record_event(
                             'order_not_confirmed',
@@ -334,7 +339,7 @@ def orders(p_quote=None):
                         l_message_with_cause = l_message + ('\n' + '\n'.join(l_cause_lines) + '\n' if l_cause_lines else '')
 
                         log_error('Items skipped in order ' + l_order_no + ':\n' + l_message_with_cause)
-                        email('Matrix Auto Order Item Exception(s) for ' + get_customer_name(), l_message_with_cause, False)
+                        email('Matrix Auto Order Item Exception(s) for ' + get_customer_name(), l_message_with_cause, False, p_sales_cc=True)
                         health.record_event('partial_order', l_message_with_cause, str(l_order.po_code or ''))
                     else:
                         update_order(l_cursor, l_order.po_key)
@@ -371,7 +376,7 @@ def orders(p_quote=None):
 
         health.record_run('orders', 'success', l_succ_cnt, l_tot_cnt)
 
-        email('Matrix Auto Order Submission for ' + get_customer_name())
+        email('Matrix Auto Order Submission for ' + get_customer_name(), p_sales_cc=True)
         rename_log()
     except Exception:
         l_traceback = traceback.format_exc()
@@ -405,7 +410,7 @@ def clear_stale_order(p_po_code):
 
 def main():
     parser = ArgumentParser(description='VMI Update Process')
-    actions = ['items', 'orders', 'images', 'clear_stale']
+    actions = ['items', 'orders', 'images', 'catalog', 'clear_stale']
     levels = ['debug', 'info', 'warn', 'error']
     parser.add_argument('-a', choices=actions, default='items', dest='action')
     parser.add_argument('-l', choices=levels, default='info', dest='level')
@@ -426,6 +431,8 @@ def main():
         orders(args.quote)
     elif args.action.lower() == 'images':
         sync_images()
+    elif args.action.lower() == 'catalog':
+        sync_catalog()
     elif args.action.lower() == 'items':
         items()
     elif args.action.lower() == 'clear_stale':

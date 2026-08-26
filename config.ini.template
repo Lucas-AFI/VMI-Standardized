@@ -22,3 +22,4 @@ local_folder = C:\Program Files (x86)\MATRIX-TM\Images\ItemPictures
 [health]
 client_name =
 endpoint_url = https://<your-azure-vm>/health/intake
+catalog_endpoint_url = https://<your-azure-vm>/health/catalog_intake

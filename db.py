@@ -91,6 +91,30 @@ def get_item_codes(l_cursor):
     return l_cursor.fetchall()
 
 
+def get_catalog_items(l_cursor):
+    #Fetch the active AFI-supplied item catalog (key, code, description,
+    #type, pack size, price) for the health dashboard's catalog sync -- same
+    #supplier/bool_bitul filter get_items()/get_item_codes() already use.
+    #LEFT JOIN to TVL_ITEM_TYPES (not inner) so an item whose TYPE_KEY
+    #doesn't resolve there still comes back with item_type NULL, rather than
+    #being silently dropped from the catalog -- the exact failure mode
+    #get_order_items() used to have with orphaned item_key references.
+    try:
+        l_cursor.execute(
+            'select m.item_key, m.item_code, m.item_description, t.type_name_old as item_type, '
+            'm.packet_size, m.item_price '
+            'from dbo.ent_item_master m '
+            'join dbo.ent_item_suppliers s on m.item_key = s.item_key '
+            'left join dbo.tvl_item_types t on m.type_key = t.type_key '
+            'where s.supplier_key = ' + str(SUPPLIER_KEY) + ' '
+            'and s.bool_bitul = 0 '
+            'and m.bool_bitul = 0'
+        )
+    except Error as e:
+        controlled_exit('FATAL: ' + str(e))
+    return l_cursor.fetchall()
+
+
 def get_orders(l_cursor):
     #Fetch all pending orders not yet sent to ERP, excluding any currently
     #marked in-flight in erp_send_state (crash/duplicate-submission guard --
