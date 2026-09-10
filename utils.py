@@ -25,7 +25,7 @@ RETRY_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = 2  # doubles each attempt: 2s, 4s, 8s
 
 
-def check_order(p_dict, p_item_list):
+def check_order(p_dict, p_item_list, p_item_qty_by_code=None):
     """
     Validate P21 order response and determine status.
     Returns: (status, order_no_or_reason, message, dropped_item_ids)
@@ -36,7 +36,16 @@ def check_order(p_dict, p_item_list):
                     (see incident note below)
       - 'error'   : order was not created
     dropped_item_ids is always a list; only non-empty when status == 'partial'.
+
+    p_item_qty_by_code: {item_code: qty} for everything originally submitted
+    (built by main.py from the same get_order_items() rows used to build the
+    order XML). Used to include the attempted quantity in the partial-order
+    message for each dropped item -- reading it from what we actually
+    submitted rather than from P21's response, since a silently-omitted line
+    (see below) has no response data to read a quantity from at all, and
+    this way both dropped-item cases report quantity the same way.
     """
+    l_item_qty_by_code = p_item_qty_by_code or {}
     if 'ResourceError' in p_dict:
         l_error_message = str(p_dict['ResourceError'].get('ErrorMessage', 'Unknown Error'))
         if 'This item ID is not valid' in l_error_message:
@@ -54,9 +63,13 @@ def check_order(p_dict, p_item_list):
     l_message = ""
     l_dropped_ids = []
 
+    def l_qty_suffix(p_item_id):
+        l_qty = l_item_qty_by_code.get(p_item_id)
+        return ' (qty ' + str(l_qty) + ' ordered)' if l_qty is not None else ''
+
     for item in l_items:
         if item.get('Delete') == 'Y':
-            l_message += 'ItemId: ' + item['ItemId'] + ' is not available to purchase\n'
+            l_message += 'ItemId: ' + item['ItemId'] + l_qty_suffix(item['ItemId']) + ' is not available to purchase\n'
             l_dropped_ids.append(item['ItemId'])
 
     # Incident, 2026-08-18: po_code 1014 submitted 5 lines; P21's response
@@ -70,7 +83,7 @@ def check_order(p_dict, p_item_list):
     for l_item_id, l_submitted_count in l_submitted_counts.items():
         l_missing_count = l_submitted_count - l_response_counts.get(l_item_id, 0)
         for _ in range(max(l_missing_count, 0)):
-            l_message += 'ItemId: ' + l_item_id + ' was silently omitted from P21\'s response (no Delete flag, just absent)\n'
+            l_message += 'ItemId: ' + l_item_id + l_qty_suffix(l_item_id) + ' was silently omitted from P21\'s response (no Delete flag, just absent)\n'
             l_dropped_ids.append(l_item_id)
 
     if l_message == "":

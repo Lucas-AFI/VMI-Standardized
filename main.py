@@ -270,6 +270,7 @@ def orders(p_quote=None):
 
             try:
                 l_order_items = get_order_items(l_cursor, l_order.po_key)
+                l_item_qty_by_code = {row.item_code: row.qty for row in l_order_items}
                 l_xml, l_item_ids = add_line_item(l_xml, l_order_items)
             except Exception as e:
                 log_error('Building XML document failed for po_code = ' + str(l_order.po_code or '') + ':\n' + str(e))
@@ -289,7 +290,7 @@ def orders(p_quote=None):
 
             try:
                 l_order_resp = create_order(l_xml)
-                l_status, l_response, l_message, l_dropped_item_ids = check_order(l_order_resp, l_item_ids)
+                l_status, l_response, l_message, l_dropped_item_ids = check_order(l_order_resp, l_item_ids, l_item_qty_by_code)
 
                 if l_status == 'error':
                     log_error('Submitting order to API failed: order not created. Reason: ' + l_response + '. po_code = ' + str(l_order.po_code or ''))
