@@ -176,7 +176,7 @@ class CredentialRow(ttk.Frame):
         self.key = key
         self.touched = False
 
-        ttk.Label(self, text=label, width=30, anchor='w').grid(row=0, column=0, sticky='w')
+        ttk.Label(self, text=label, width=34, anchor='w').grid(row=0, column=0, sticky='w')
 
         self.entry = ttk.Entry(self, width=36, show='*', state='disabled')
         self.entry.grid(row=0, column=1, padx=4)
@@ -262,8 +262,8 @@ class ConfigureTab(ScrollableFrame):
         for field_id, label, values in fields:
             row = ttk.Frame(frame)
             row.pack(fill='x', padx=8, pady=3)
-            ttk.Label(row, text=label, width=30, anchor='w').pack(side='left')
-            entry = ttk.Entry(row, width=40)
+            ttk.Label(row, text=label, width=44, anchor='w').pack(side='left')
+            entry = ttk.Entry(row, width=50)
             entry.insert(0, values.get(field_id, ''))
             entry.pack(side='left', padx=4)
             self.entries[field_id] = entry
@@ -414,12 +414,18 @@ class ScheduledTasksTab(ttk.Frame):
         row = ttk.Frame(self.rows_frame)
         row.pack(fill='x', pady=4)
         ttk.Label(row, text=spec['name'], width=24, anchor='w').pack(side='left')
-        status_var = tk.StringVar(value='checking...')
-        status_label = ttk.Label(row, textvariable=status_var, width=40, anchor='w')
-        status_label.pack(side='left', padx=6)
         create_btn = ttk.Button(row, text='Create...', state='disabled',
                                   command=lambda k=spec['key']: self.on_create(k))
-        create_btn.pack(side='left', padx=6)
+        # Packed before the status label and anchored right, so an arbitrarily
+        # long detected task name (real data from this machine's own Task
+        # Scheduler, not something we can size for in advance) can't push the
+        # button off the row or get clipped fighting it for space -- ttk.Label
+        # treats a fixed `width` as a hard character clip with no ellipsis,
+        # which is exactly what was cutting long names off.
+        create_btn.pack(side='right', padx=6)
+        status_var = tk.StringVar(value='checking...')
+        status_label = ttk.Label(row, textvariable=status_var, anchor='w')
+        status_label.pack(side='left', padx=6, fill='x', expand=True)
         self.row_widgets[spec['key']] = (status_var, status_label, create_btn)
 
     def refresh(self):
