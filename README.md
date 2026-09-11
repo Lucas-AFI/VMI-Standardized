@@ -55,6 +55,32 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for the full step-by-step guide. The short ve
 
 ---
 
+## GUI Control Panel
+
+`control_panel.py` is an optional Tkinter front end over the same scripts and `config.ini`/Credential
+Manager entries described above — nothing below changes because of it, and running it is entirely
+opt-in:
+
+```
+python control_panel.py
+pythonw control_panel.py     # no console window
+```
+
+- **Configure tab** — the same fields as `collect_config.py`, pre-filled from the existing
+  `config.ini` if one is already present. Saving never blanks a credential you didn't explicitly
+  unlock and retype.
+- **Run tab** — buttons for Price Sync, Auto Orders, Item Image Sync, Catalog Sync, Health Reporter,
+  Verify Config/Credentials, and Pull Latest Updates, each shelling out to the exact same command
+  Task Scheduler runs, with output streamed into the window instead of a cmd prompt.
+- **Scheduled Tasks tab** — shows which of the six tasks in DEPLOYMENT.md's table already exist
+  (checked by the actual command they run, not just by name, so it won't create a duplicate of a
+  task that's already there under a different name) and can create whichever are missing.
+
+Safe to pull onto an already-deployed machine — it's an additional file that does nothing until
+someone opens it.
+
+---
+
 ## Integrating This Repo Onto an Already-Deployed Customer Machine
 
 Machines that were set up before `health.py`/`health_reporter.py`/the SendGrid switch/

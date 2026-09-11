@@ -52,6 +52,11 @@ SQL error until this step is done.
 
 ## 4. Configure the machine (`config.ini` + credentials)
 
+> **Alternative:** `python control_panel.py` (see README.md's "GUI Control Panel" section) covers
+> this same step — and step 6 below — through a form/buttons instead of a raw prompt, and is safe to
+> use on an already-configured machine since it never overwrites a value you haven't explicitly
+> edited. The steps below describe the original CLI path, which still works exactly as documented.
+
 Run the interactive collector once — it writes `config.ini` **and** stores
 credentials in Windows Credential Manager in a single pass:
 
@@ -151,6 +156,11 @@ python main.py -a catalog -l debug   # catalog sync (only if [health] catalog_en
   dashboard's `/health/dashboard` page.
 
 ## 6. Configure Task Scheduler
+
+> **Alternative:** `control_panel.py`'s "Scheduled Tasks" tab can create any of the tasks below that
+> are missing, using these same names/commands. It checks for an existing equivalent task by the
+> command it actually runs (not just by name) first, so it won't create a duplicate of one that's
+> already scheduled under a different name — see README.md.
 
 Six scheduled tasks total (five if this machine isn't running Item Image Sync, four if it's also
 not running Catalog Sync). All run the same Python interpreter used above, with **Start in** set
