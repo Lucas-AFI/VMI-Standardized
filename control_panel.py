@@ -586,5 +586,19 @@ class ControlPanelApp(tk.Tk):
 
 
 if __name__ == '__main__':
+    # Double-clicking a .py (or running `python control_panel.py`) launches
+    # the console-subsystem python.exe, which keeps a cmd window open behind
+    # the GUI for the whole session. Relaunch once under the windowless
+    # pythonw.exe instead and exit this process -- `--no-relaunch` stops the
+    # loop if pythonw.exe isn't sitting next to this interpreter for some
+    # reason. A brief console flash on launch is normal; it closes as soon
+    # as the relaunch happens. A shortcut built against pythonw.exe directly
+    # skips even that.
+    if os.name == 'nt' and '--no-relaunch' not in sys.argv and sys.executable.lower().endswith('python.exe'):
+        pythonw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
+        if os.path.exists(pythonw):
+            subprocess.Popen([pythonw, os.path.abspath(__file__), '--no-relaunch'], cwd=SCRIPT_DIR)
+            sys.exit(0)
+
     app = ControlPanelApp()
     app.mainloop()
