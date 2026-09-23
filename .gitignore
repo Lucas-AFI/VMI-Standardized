@@ -11,6 +11,12 @@ logs/health_reporter.log
 # Logs
 logs/
 
+# Install wizard build artifacts -- the bundled Python installer and the
+# compiled setup .exe are build output, not source; client machines' git
+# pull should never have to fetch these.
+installer/vendor/
+installer/Output/
+
 # Python
 __pycache__/
 *.py[cod]
