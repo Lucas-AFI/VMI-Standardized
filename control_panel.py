@@ -46,6 +46,9 @@ SERVICE_NAME = _credentials.SERVICE_NAME
 
 DEFAULT_IMAGE_FOLDER = r'C:\Program Files (x86)\MATRIX-TM\Images\ItemPictures'
 
+LOGO_PATH = os.path.join(SCRIPT_DIR, 'assets', 'afi_logo.png')
+ICON_PATH = os.path.join(SCRIPT_DIR, 'assets', 'afi_icon.png')
+
 # (field id, section, key, label, default)
 CONFIG_FIELDS = {
     'sql_server_name':           ('database', 'sql_server_name', ''),
@@ -72,10 +75,18 @@ REQUIRED_FIELDS = [
     ('sql_db_name', 'SQL Database Name'),
     ('p21_customer_id', 'P21 Customer ID'),
     ('email_to', 'Email To'),
-    ('images_base_url', 'Image Host Base URL'),
     ('health_client_name', 'Health Dashboard Client Name'),
     ('health_endpoint_url', 'Health Dashboard Endpoint URL'),
 ]
+# Deliberately NOT required: Image Host Base URL. Unlike the other fields
+# above, config.py's get_image_base_url() is only ever called (and only
+# raises) when sync_images() actually runs -- README.md is explicit that a
+# machine not running Item Image Sync needs no [images] config at all. The
+# original collect_config.py CLI required it unconditionally anyway, which
+# was harmless there (it only runs once at initial setup) but meant this
+# Save button -- used repeatedly for small edits -- would silently refuse to
+# write ANY change, including an unrelated one, on a machine that legitimately
+# doesn't run Image Sync and so has this field blank.
 
 # (keyring key, label)
 CREDENTIAL_FIELDS = [
@@ -154,16 +165,25 @@ class ScrollableFrame(ttk.Frame):
 
     def __init__(self, parent):
         super().__init__(parent)
-        canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(self, orient='vertical', command=canvas.yview)
-        self.body = ttk.Frame(canvas)
+        self.canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self, orient='vertical', command=self.canvas.yview)
+        self.body = ttk.Frame(self.canvas)
 
-        self.body.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
-        canvas.create_window((0, 0), window=self.body, anchor='nw')
-        canvas.configure(yscrollcommand=scrollbar.set)
+        self.body.bind('<Configure>', lambda e: self.canvas.configure(scrollregion=self.canvas.bbox('all')))
+        self.canvas.create_window((0, 0), window=self.body, anchor='nw')
+        self.canvas.configure(yscrollcommand=scrollbar.set)
 
-        canvas.pack(side='left', fill='both', expand=True)
+        self.canvas.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
+        # Mouse-wheel scrolling is wired up at the application level (see
+        # ControlPanelApp) rather than here -- binding <Enter>/<Leave> on
+        # just this canvas doesn't work: `body` is embedded as a real child
+        # window covering nearly the entire canvas, so the canvas's own
+        # surface is almost never actually under the cursor and those
+        # events rarely fire.
+
+    def scroll_units(self, units):
+        self.canvas.yview_scroll(units, 'units')
 
 
 class CredentialRow(ttk.Frame):
@@ -208,53 +228,65 @@ class CredentialRow(ttk.Frame):
         return None
 
 
-class ConfigureTab(ScrollableFrame):
+class ConfigureTab(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         self.entries = {}
         self.cred_rows = {}
 
+        # Packed first, side='bottom', so Save can never end up scrolled out
+        # of view below a tall form -- it was previously placed inside the
+        # scrollable body itself and became unreachable (short of dragging a
+        # mouse-wheel-less scrollbar) once enough sections pushed it below
+        # the visible window height.
+        footer = ttk.Frame(self)
+        footer.pack(side='bottom', fill='x')
+        ttk.Separator(footer).pack(fill='x')
+        btn_frame = ttk.Frame(footer)
+        btn_frame.pack(fill='x', padx=10, pady=10)
+        ttk.Button(btn_frame, text='Save', command=self.on_save).pack(side='left')
+        self.status_var = tk.StringVar(value='')
+        ttk.Label(btn_frame, textvariable=self.status_var).pack(side='left', padx=10)
+
+        self.scroll = ScrollableFrame(self)
+        self.scroll.pack(side='top', fill='both', expand=True)
+        body = self.scroll.body
+
         values = load_config_values()
 
-        self._section(self.body, 'Database', [
+        self._section(body, 'Database', [
             ('sql_server_name', 'SQL Server Name', values),
             ('sql_db_name', 'SQL Database Name', values),
             ('supplier_key', 'Supplier Key', values),
         ])
-        self._section(self.body, 'P21', [
+        self._section(body, 'P21', [
             ('p21_customer_id', 'P21 Customer ID', values),
             ('p21_ship_to_id', 'P21 Ship To ID (optional)', values),
             ('p21_contract_id', 'P21 Contract ID (optional)', values),
             ('location_id', 'Location ID', values),
             ('po_prefix', 'PO Prefix (optional)', values),
         ])
-        self._section(self.body, 'Email', [
+        self._section(body, 'Email', [
             ('email_to', 'Email To (comma-separated)', values),
             ('email_cc', 'Email CC (optional)', values),
             ('email_sales_cc', 'Sales Email CC -- orders only (optional)', values),
         ])
-        self._section(self.body, 'Item Images (only if this machine runs Item Image Sync)', [
+        self._section(body, 'Item Images (only if this machine runs Item Image Sync)', [
             ('images_base_url', 'Image Host Base URL', values),
             ('images_local_folder', 'Local Image Folder', values),
         ])
-        self._section(self.body, 'Health Reporter', [
+        self._section(body, 'Health Reporter', [
             ('health_client_name', 'Health Dashboard Client Name', values),
             ('health_endpoint_url', 'Health Dashboard Endpoint URL', values),
             ('health_catalog_endpoint_url', 'Catalog Sync Endpoint URL (optional)', values),
         ])
 
-        cred_frame = ttk.LabelFrame(self.body, text='Credentials (Windows Credential Manager -- never written to config.ini)')
+        cred_frame = ttk.LabelFrame(body, text='Credentials (Windows Credential Manager -- never written to config.ini)')
         cred_frame.pack(fill='x', padx=10, pady=10)
         for key, label in CREDENTIAL_FIELDS:
             row = CredentialRow(cred_frame, key, label)
             row.pack(fill='x', padx=8, pady=3)
             self.cred_rows[key] = row
-
-        btn_frame = ttk.Frame(self.body)
-        btn_frame.pack(fill='x', padx=10, pady=14)
-        ttk.Button(btn_frame, text='Save', command=self.on_save).pack(side='left')
-        self.status_var = tk.StringVar(value='')
-        ttk.Label(btn_frame, textvariable=self.status_var).pack(side='left', padx=10)
 
     def _section(self, parent, title, fields):
         frame = ttk.LabelFrame(parent, text=title)
@@ -583,12 +615,44 @@ class ControlPanelApp(tk.Tk):
         self.title('VMI Control Panel')
         self.geometry('820x620')
 
+        # Logged as failures are swallowed, not raised: a missing/corrupt
+        # assets/ folder (e.g. someone's local copy predates this change)
+        # should never stop the app from opening, just skip the branding.
+        try:
+            self._icon_photo = tk.PhotoImage(file=ICON_PATH)
+            self.iconphoto(True, self._icon_photo)
+        except Exception:
+            pass
+
+        try:
+            header = ttk.Frame(self)
+            header.pack(fill='x', side='top')
+            self._logo_photo = tk.PhotoImage(file=LOGO_PATH)
+            ttk.Label(header, image=self._logo_photo).pack(side='left', padx=10, pady=6)
+            ttk.Separator(header, orient='horizontal').pack(side='bottom', fill='x')
+        except Exception:
+            pass
+
         notebook = ttk.Notebook(self)
         notebook.pack(fill='both', expand=True)
 
-        notebook.add(ConfigureTab(notebook), text='Configure')
+        self.notebook = notebook
+        self.configure_tab = ConfigureTab(notebook)
+        notebook.add(self.configure_tab, text='Configure')
         notebook.add(RunTab(notebook), text='Run')
         notebook.add(ScheduledTasksTab(notebook), text='Scheduled Tasks')
+
+        # Window-wide, not tied to hovering a specific widget -- bind_all is
+        # the lowest-priority fallback in Tk's event dispatch, so it never
+        # overrides a widget's own native scrolling (e.g. the Run tab's
+        # Text log already scrolls itself); it only kicks in for widgets
+        # that don't otherwise handle the wheel themselves, which covers
+        # every plain Label/Entry/Frame in the Configure form.
+        self.bind_all('<MouseWheel>', self._on_mousewheel)
+
+    def _on_mousewheel(self, event):
+        if str(self.notebook.select()) == str(self.configure_tab):
+            self.configure_tab.scroll.scroll_units(int(-1 * (event.delta / 120)))
 
 
 if __name__ == '__main__':
