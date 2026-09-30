@@ -77,8 +77,8 @@ It will prompt for:
 | Field | config.ini key | Notes |
 |---|---|---|
 | P21 Customer ID | `[p21] p21_customer_id` | Required |
-| P21 Ship To ID | `[p21] p21_ship_to_id` | Optional — only if this customer has multiple ship-to locations |
-| P21 Contract ID | `[p21] p21_contract_id` | Optional |
+| P21 Ship To ID | `[p21] p21_ship_to_id` | Optional — only if this customer has multiple ship-to locations. Affects both order submission **and** price sync: P21 pricing can differ per ship-to for a subset of items, so leaving this blank when the customer has multiple ship-tos can silently return the wrong price for those items |
+| P21 Contract ID | `[p21] p21_contract_id` | Optional. **Not currently used** — `p21_contract_id` is read into config but nothing in the price-sync or order-submission path sends it to P21 (`get_item_post()` in api.py implements contract-based pricing but is never called from `main.py`). Confirm whether this is intended before assuming it affects pricing |
 | Location ID | `[p21] location_id` | Default `10` |
 | PO Prefix | `[p21] po_prefix` | Optional |
 

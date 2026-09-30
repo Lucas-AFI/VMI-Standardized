@@ -11,7 +11,7 @@ from time import sleep
 import xmltodict
 from xml_processor import tostring
 from credentials import get_base_url, get_api_username, get_api_password
-from config import get_customer_id, get_location_id
+from config import get_customer_id, get_location_id, get_ship_to_id
 from log import log_debug, log_error
 
 l_base_url = get_base_url()
@@ -139,6 +139,7 @@ def get_customer_name():
 def get_item(p_item):
     """Get pricing data for a single item from P21"""
     l_loc = get_location_id()
+    l_ship_to = get_ship_to_id()
     l_headers = {"Authorization": "Bearer " + l_token, "Content-Length": "0"}
     l_endpoint = (
         l_base_url +
@@ -148,6 +149,13 @@ def get_item(p_item):
         '&saleslocid=' + l_loc +
         '&sourcelocid=' + l_loc
     )
+    # Only appended when configured (p21_ship_to_id is optional -- see
+    # config.py) so a machine with a single ship-to gets the exact same
+    # request it always has. When it IS set, P21's pricing can differ per
+    # ship-to for a subset of items even with the same customer/contract --
+    # omitting it was returning the wrong multiplier for exactly those items.
+    if l_ship_to:
+        l_endpoint += '&shiptoid=' + str(l_ship_to)
     l_response = _request_with_escalating_retry(requests.get, l_endpoint, headers=l_headers).text
     try:
         l_dict = xmltodict.parse(l_response)
