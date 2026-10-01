@@ -31,7 +31,7 @@ import queue
 import threading
 import subprocess
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 from configparser import ConfigParser
 
 import keyring
@@ -419,8 +419,18 @@ class RunTab(ttk.Frame):
             btn.grid(row=i // 4, column=i % 4, padx=4, pady=4, sticky='ew')
             buttons.append(btn)
 
+        clear_btn = ttk.Button(btn_bar, text='Clear Stale PO...', command=lambda: self._clear_stale(runner))
+        clear_btn.grid(row=len(self.ACTIONS) // 4, column=len(self.ACTIONS) % 4, padx=4, pady=4, sticky='ew')
+        buttons.append(clear_btn)
+
         for col in range(4):
             btn_bar.columnconfigure(col, weight=1)
+
+    def _clear_stale(self, runner):
+        po_code = simpledialog.askstring('Clear Stale PO', 'PO code to clear from erp_send_state tracking:', parent=self)
+        if po_code and po_code.strip():
+            runner.start(f'Clear Stale PO {po_code.strip()}',
+                         [sys.executable, 'main.py', '-a', 'clear_stale', '--po-code', po_code.strip()])
 
 
 class ScheduledTasksTab(ttk.Frame):
