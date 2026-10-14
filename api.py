@@ -28,7 +28,10 @@ RETRY_BACKOFF_SECONDS = 2      # doubles each attempt: 2s, 4s, 8s
 # a day across two machines -- 15s wasn't enough margin for P21's real-world
 # response time on order creation specifically. Single attempt either way
 # (see _request_once()'s docstring for why this never retries).
-ORDER_REQUEST_TIMEOUT = 30    # seconds, single attempt
+ORDER_REQUEST_TIMEOUT = 90    # seconds, single attempt -- bumped from 30s after two
+                               # "Read timed out" failures on large orders (24 and 84
+                               # lines) that both actually succeeded in P21; large line
+                               # counts just take P21 longer to respond to than small ones.
 
 # Price sync only (get_item()) -- deliberately separate from
 # _request_with_retry() above so tuning this for price sync's real-world
