@@ -103,8 +103,8 @@ def items():
 
             l_consecutive_failures = 0
 
-            if 'ResourceError' in l_item.keys():
-                log_error('Item not found in API: ' + row.item_code)
+            if 'ResourceError' in l_item.keys() or 'UnitPrice' not in (l_item.get('ItemPrice') or {}):
+                log_error('Item not found in API (or unexpected response shape): ' + row.item_code + ' -- ' + str(l_item))
                 l_err_cnt += 1
                 l_err_items.append(row.item_code)
             else:
