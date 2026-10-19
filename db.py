@@ -127,7 +127,7 @@ def get_orders(l_cursor):
     #required together; neither replaces the other.
     try:
         l_cursor.execute(
-            'select distinct po_key, po_code '
+            'select distinct po_key, po_code, po_ordered_date '
             'from dbo.ent_po_headers '
             'where po_key in (select po_key from dbo.ent_po_details) '
             'and send_erp = 0 '

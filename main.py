@@ -14,6 +14,7 @@ Usage:
 from argparse import ArgumentParser
 from sys import exit
 from time import sleep
+from collections import Counter
 import traceback
 from log import configure_logs, log_debug, log_info, log_error, start_log, stop_log, log_shutdown, set_level
 from utils import coalesce, email, rename_log, check_order, get_contract, classify_dropped_item
@@ -339,8 +340,30 @@ def orders(p_quote=None):
                         ]
                         l_message_with_cause = l_message + ('\n' + '\n'.join(l_cause_lines) + '\n' if l_cause_lines else '')
 
+                        # Valid = everything submitted minus the dropped ones, counted
+                        # (not set-diffed) so a duplicate item code across two lines
+                        # isn't miscounted if only one of the two was dropped.
+                        # ponytail: l_item_qty_by_code is a plain {code: qty} dict (see
+                        # above), so if the same item code appears on two separate
+                        # lines with different quantities, only the last line's qty
+                        # survives here -- same pre-existing limitation check_order()
+                        # already has for dropped-item quantities. Fix if that ever
+                        # actually happens: key qty by (code, line_no) instead.
+                        l_valid_counts = Counter(l_item_ids) - Counter(l_dropped_item_ids)
+                        l_valid_lines = [
+                            'ItemId: ' + l_code + ' (qty ' + str(l_item_qty_by_code.get(l_code, l_qty)) + ')'
+                            for l_code, l_qty in l_valid_counts.items() for _ in range(l_qty)
+                        ]
+                        l_full_message = (
+                            'PO Code: ' + str(l_order.po_code or '') + '\n' +
+                            'Order Date: ' + str(getattr(l_order, 'po_ordered_date', '') or '') + '\n' +
+                            'OrderNo: ' + l_order_no + '\n\n' +
+                            'Items Ordered Successfully:\n' + ('\n'.join(l_valid_lines) if l_valid_lines else '(none)') + '\n\n' +
+                            'Items Dropped:\n' + ('\n'.join(l_cause_lines) if l_cause_lines else '(none)')
+                        )
+
                         log_error('Items skipped in order ' + l_order_no + ':\n' + l_message_with_cause)
-                        email('Matrix Auto Order Item Exception(s) for ' + get_customer_name(), l_message_with_cause, False, p_sales_cc=True)
+                        email('Matrix Auto Order Item Exception(s) for ' + get_customer_name(), l_full_message, False, p_sales_cc=True)
                         health.record_event('partial_order', l_message_with_cause, str(l_order.po_code or ''))
                     else:
                         update_order(l_cursor, l_order.po_key)
