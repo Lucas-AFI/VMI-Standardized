@@ -17,7 +17,8 @@ from time import sleep
 from collections import Counter
 import traceback
 from log import configure_logs, log_debug, log_info, log_error, start_log, stop_log, log_shutdown, set_level
-from utils import coalesce, email, rename_log, check_order, get_contract, classify_dropped_item
+from utils import coalesce, email, rename_log, check_order, get_contract, classify_dropped_item, build_xlsx
+from config import get_email_partial_order
 from db import connect_db, close_db_conn, get_items, update_item, get_orders, get_order_items, update_order, mark_inflight, clear_inflight, get_stale_inflight, record_open_order, get_open_orders, clear_open_order, clear_stale_by_po_code
 from api import get_item, get_customer_name, create_order, approve_order, check_item_availability, get_order_status
 from xml_processor import build_order, add_line_item, print_xml
@@ -142,6 +143,51 @@ def items():
         health.record_event('run_failure', l_traceback)
         health.record_run('items', 'error', l_succ_cnt, l_tot_cnt, l_err_cnt, l_err_items)
         raise
+
+
+def build_partial_order_alert(p_customer, p_order, p_order_no, p_order_items, p_dropped_item_ids):
+    """
+    Subject, body, attachment filename and .xlsx bytes for the partial-order
+    alert. Pure (no DB/API calls) so it can be tested/sampled standalone.
+
+    p_order_items: the get_order_items() rows that were submitted. Dropped vs.
+    ordered is decided per line by consuming p_dropped_item_ids, so the same
+    item code on two lines where only one was dropped is still split right.
+    """
+    l_dropped_left = Counter(p_dropped_item_ids)
+    l_dropped_rows, l_ordered_rows = [], []
+    for r in p_order_items:
+        l_qty = float(r.qty or 0)
+        l_row = [r.item_code, int(l_qty) if l_qty.is_integer() else l_qty, r.item_description or '']
+        if l_dropped_left[r.item_code] > 0:
+            l_dropped_left[r.item_code] -= 1
+            l_dropped_rows.append(l_row)
+        else:
+            l_ordered_rows.append(l_row)
+
+    l_header = ['Item #', 'Qty Ordered', 'Item Description']
+    l_xlsx = build_xlsx([
+        ('Dropped Items', l_header, l_dropped_rows),
+        ('Ordered Items', l_header, l_ordered_rows),
+    ])
+
+    l_safe_customer = ''.join(c for c in p_customer if c not in '\\/:*?"<>|').strip()
+    l_xlsx_name = str(p_order_no) + '_' + l_safe_customer + '.xlsx'
+
+    l_date = getattr(p_order, 'po_ordered_date', None)
+    l_date = l_date.strftime('%m/%d/%Y') if hasattr(l_date, 'strftime') else str(l_date or '')
+
+    l_subject = 'Partial Order Alert - ' + p_customer + ' - P21 Order ' + str(p_order_no)
+    l_body = (
+        'A partial order was detected for ' + p_customer + ': ' +
+        str(len(l_dropped_rows)) + ' of ' + str(len(p_order_items)) +
+        ' item(s) were dropped by P21 and were NOT ordered.\n\n'
+        'PO Code: ' + str(p_order.po_code or '') + '\n'
+        'Order Date: ' + l_date + '\n'
+        'P21 Order No: ' + str(p_order_no) + '\n\n'
+        'The dropped and ordered items are listed in the attached spreadsheet (' + l_xlsx_name + ').\n'
+    )
+    return l_subject, l_body, l_xlsx_name, l_xlsx
 
 
 def _order_is_resolved(p_order_status):
@@ -340,30 +386,14 @@ def orders(p_quote=None):
                         ]
                         l_message_with_cause = l_message + ('\n' + '\n'.join(l_cause_lines) + '\n' if l_cause_lines else '')
 
-                        # Valid = everything submitted minus the dropped ones, counted
-                        # (not set-diffed) so a duplicate item code across two lines
-                        # isn't miscounted if only one of the two was dropped.
-                        # ponytail: l_item_qty_by_code is a plain {code: qty} dict (see
-                        # above), so if the same item code appears on two separate
-                        # lines with different quantities, only the last line's qty
-                        # survives here -- same pre-existing limitation check_order()
-                        # already has for dropped-item quantities. Fix if that ever
-                        # actually happens: key qty by (code, line_no) instead.
-                        l_valid_counts = Counter(l_item_ids) - Counter(l_dropped_item_ids)
-                        l_valid_lines = [
-                            'ItemId: ' + l_code + ' (qty ' + str(l_item_qty_by_code.get(l_code, l_qty)) + ')'
-                            for l_code, l_qty in l_valid_counts.items() for _ in range(l_qty)
-                        ]
-                        l_full_message = (
-                            'PO Code: ' + str(l_order.po_code or '') + '\n' +
-                            'Order Date: ' + str(getattr(l_order, 'po_ordered_date', '') or '') + '\n' +
-                            'OrderNo: ' + l_order_no + '\n\n' +
-                            'Items Ordered Successfully:\n' + ('\n'.join(l_valid_lines) if l_valid_lines else '(none)') + '\n\n' +
-                            'Items Dropped:\n' + ('\n'.join(l_cause_lines) if l_cause_lines else '(none)')
+                        l_customer = get_customer_name()
+                        l_subject, l_body, l_xlsx_name, l_xlsx = build_partial_order_alert(
+                            l_customer, l_order, l_order_no, l_order_items, l_dropped_item_ids
                         )
 
                         log_error('Items skipped in order ' + l_order_no + ':\n' + l_message_with_cause)
-                        email('Matrix Auto Order Item Exception(s) for ' + get_customer_name(), l_full_message, False, p_sales_cc=True)
+                        email(l_subject, l_body, False, p_sales_cc=True,
+                              p_extra_to=get_email_partial_order(), p_attachments=[(l_xlsx_name, l_xlsx)])
                         health.record_event('partial_order', l_message_with_cause, str(l_order.po_code or ''))
                     else:
                         update_order(l_cursor, l_order.po_key)

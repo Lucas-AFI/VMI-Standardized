@@ -101,6 +101,7 @@ def collect():
     email_to = prompt('Email To', 'VMI@afi-tools.com')
     email_cc = prompt('Email CC (optional, press Enter to skip)', '')
     email_sales_cc = prompt('Sales Email CC -- order emails only, not pricing/error reports (optional, press Enter to skip)', '')
+    email_partial_order = prompt('Partial Order Alerts ONLY -- receives just the partial-order alert (optional, press Enter to skip)', '')
 
     # Images
     print()
@@ -154,6 +155,7 @@ def collect():
         'email_to': email_to,
         'email_cc': email_cc,
         'email_sales_cc': email_sales_cc,
+        'email_partial_order': email_partial_order,
     }
 
     config['images'] = {
@@ -209,6 +211,7 @@ def collect():
     print(f'  Email To       : {email_to}')
     print(f'  Email CC       : {email_cc or "(not set)"}')
     print(f'  Sales Email CC : {email_sales_cc or "(not set)"}')
+    print(f'  Partial Alerts : {email_partial_order or "(not set)"}')
     print(f'  Image Base URL : {image_base_url}')
     print(f'  Image Folder   : {local_image_folder}')
     print(f'  Health Client  : {health_client_name}')

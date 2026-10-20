@@ -14,6 +14,9 @@ from log import log_debug, log_error
 from datetime import datetime
 from time import sleep
 from collections import Counter
+from io import BytesIO
+from zipfile import ZipFile, ZIP_DEFLATED
+from xml.sax.saxutils import escape as xml_escape
 from config import get_email_to, get_email_cc, get_email_sales_cc, get_contract_id
 import credentials
 import health
@@ -182,7 +185,7 @@ def _send_email_with_retry(p_msg, p_all_recip):
     raise l_last_exc
 
 
-def email(p_subject, p_message="", p_log=True, p_attach=True, p_sales_cc=False):
+def email(p_subject, p_message="", p_log=True, p_attach=True, p_sales_cc=False, p_extra_to=None, p_attachments=None):
     """
     Send email notification with optional log file attachment.
 
@@ -196,6 +199,9 @@ def email(p_subject, p_message="", p_log=True, p_attach=True, p_sales_cc=False):
                      into order-related emails, not pricing/error reports --
                      callers in orders() pass True; items()/db.py's
                      controlled_exit() leave this False.
+        p_extra_to : extra To addresses for this one email only (e.g.
+                     email_partial_order on the partial-order alert)
+        p_attachments : list of (filename, bytes) to attach
 
     Never raises. Retries transient connection failures; on total failure
     (retries exhausted, or a non-retryable rejection like bad auth or a
@@ -210,8 +216,8 @@ def email(p_subject, p_message="", p_log=True, p_attach=True, p_sales_cc=False):
     successfully-submitted order's erp_send_state stuck 'inflight' just
     because the *notification* about it failed.
     """
-    l_to = get_email_to()
-    l_cc = get_email_cc() + (get_email_sales_cc() if p_sales_cc else [])
+    l_to = list(dict.fromkeys(get_email_to() + (p_extra_to or [])))
+    l_cc = [a for a in dict.fromkeys(get_email_cc() + (get_email_sales_cc() if p_sales_cc else [])) if a not in l_to]
     l_all_recip = l_to + l_cc
 
     msg = MIMEMultipart()
@@ -233,6 +239,11 @@ def email(p_subject, p_message="", p_log=True, p_attach=True, p_sales_cc=False):
     else:
         msg.attach(MIMEText(p_message or ''))
 
+    for l_name, l_data in (p_attachments or []):
+        part = MIMEApplication(l_data, Name=l_name)
+        part['Content-Disposition'] = 'attachment; filename="%s"' % l_name
+        msg.attach(part)
+
     try:
         l_refused = _send_email_with_retry(msg, l_all_recip)
     except Exception as e:
@@ -245,3 +256,82 @@ def email(p_subject, p_message="", p_log=True, p_attach=True, p_sales_cc=False):
         health.record_event('email_failure', 'Subject: ' + p_subject + ' -- recipients refused: ' + str(l_refused))
     else:
         log_debug('Email sent: ' + p_subject)
+
+
+def build_xlsx(p_sheets):
+    """
+    Minimal .xlsx writer -- stdlib only, on purpose: openpyxl isn't in
+    requirements.txt, and existing machines only ever `git pull` (never
+    `pip install`), so importing it would break Auto Orders fleet-wide.
+
+    p_sheets: list of (sheet_name, header, rows). Header row is bold; numbers
+    are written as real numeric cells, everything else as text.
+    Returns the file as bytes.
+
+    ponytail: column letters are chr(65 + c), so max 26 columns (A-Z).
+    """
+    def l_cell(p_ref, p_val, p_bold):
+        l_style = ' s="1"' if p_bold else ''
+        if isinstance(p_val, (int, float)) and not isinstance(p_val, bool):
+            return '<c r="%s"%s><v>%s</v></c>' % (p_ref, l_style, p_val)
+        return '<c r="%s"%s t="inlineStr"><is><t xml:space="preserve">%s</t></is></c>' % (
+            p_ref, l_style, xml_escape('' if p_val is None else str(p_val)))
+
+    l_buf = BytesIO()
+    with ZipFile(l_buf, 'w', ZIP_DEFLATED) as z:
+        z.writestr('[Content_Types].xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            + ''.join('<Override PartName="/xl/worksheets/sheet%d.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' % (i + 1)
+                      for i in range(len(p_sheets)))
+            + '</Types>')
+        z.writestr('_rels/.rels',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            '</Relationships>')
+        z.writestr('xl/workbook.xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
+            + ''.join('<sheet name="%s" sheetId="%d" r:id="rId%d"/>' % (xml_escape(name), i + 1, i + 1)
+                      for i, (name, _, _) in enumerate(p_sheets))
+            + '</sheets></workbook>')
+        z.writestr('xl/_rels/workbook.xml.rels',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            + ''.join('<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet%d.xml"/>' % (i + 1, i + 1)
+                      for i in range(len(p_sheets)))
+            + '<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' % (len(p_sheets) + 1)
+            + '</Relationships>')
+        z.writestr('xl/styles.xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
+            '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+            '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+            '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+            '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+            '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>'
+            '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+            '</styleSheet>')
+
+        for i, (_, l_header, l_rows) in enumerate(p_sheets):
+            l_all = [l_header] + list(l_rows)
+            l_widths = [max(len(str(r[c])) if c < len(r) and r[c] is not None else 0 for r in l_all) + 2
+                        for c in range(len(l_header))]
+            l_cols = ''.join('<col min="%d" max="%d" width="%d" customWidth="1"/>' % (c + 1, c + 1, min(max(w, 8), 80))
+                             for c, w in enumerate(l_widths))
+            l_data = ''.join(
+                '<row r="%d">%s</row>' % (r + 1, ''.join(
+                    l_cell(chr(65 + c) + str(r + 1), v, r == 0) for c, v in enumerate(row)))
+                for r, row in enumerate(l_all))
+            z.writestr('xl/worksheets/sheet%d.xml' % (i + 1),
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                '<cols>' + l_cols + '</cols><sheetData>' + l_data + '</sheetData></worksheet>')
+    return l_buf.getvalue()

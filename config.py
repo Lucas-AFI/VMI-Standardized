@@ -75,6 +75,12 @@ def get_email_sales_cc():
     raw = _get('email', 'email_sales_cc', fallback='')
     return [addr.strip() for addr in raw.split(',') if addr.strip()]
 
+def get_email_partial_order():
+    # Receives ONLY the partial-order alert (see orders() in main.py) -- for
+    # a sales rep who wants dropped-item alerts without every other order email.
+    raw = _get('email', 'email_partial_order', fallback='')
+    return [addr.strip() for addr in raw.split(',') if addr.strip()]
+
 
 # Images
 

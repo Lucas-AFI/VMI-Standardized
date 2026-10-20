@@ -88,6 +88,7 @@ It will prompt for:
 | Email To | `[email] email_to` | Comma-separated. Default `VMI@afi-tools.com` |
 | Email CC | `[email] email_cc` | Optional, comma-separated. Cc'd on every email |
 | Sales Email CC | `[email] email_sales_cc` | Optional, comma-separated. Cc'd only on order-related emails (Auto Orders) -- never pricing/error reports |
+| Partial Order Alerts ONLY | `[email] email_partial_order` | Optional, comma-separated. Receives only the partial-order alert (with the `{orderno}_{customer}.xlsx` attachment) -- no other order emails. For a sales rep who just wants dropped-item alerts |
 
 **Item Images** (only required if this machine will run Item Image Sync)
 | Field | config.ini key | Notes |

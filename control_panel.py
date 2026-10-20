@@ -62,6 +62,7 @@ CONFIG_FIELDS = {
     'email_to':                      ('email', 'email_to', 'VMI@afi-tools.com'),
     'email_cc':                      ('email', 'email_cc', ''),
     'email_sales_cc':              ('email', 'email_sales_cc', ''),
+    'email_partial_order':         ('email', 'email_partial_order', ''),
     'images_base_url':            ('images', 'base_url', ''),
     'images_local_folder':      ('images', 'local_folder', DEFAULT_IMAGE_FOLDER),
     'health_client_name':        ('health', 'client_name', ''),
@@ -145,6 +146,7 @@ def save_config_values(values):
         'email_to': values['email_to'],
         'email_cc': values['email_cc'],
         'email_sales_cc': values['email_sales_cc'],
+        'email_partial_order': values['email_partial_order'],
     }
     cp['images'] = {
         'base_url': values['images_base_url'],
@@ -270,6 +272,7 @@ class ConfigureTab(ttk.Frame):
             ('email_to', 'Email To (comma-separated)', values),
             ('email_cc', 'Email CC (optional)', values),
             ('email_sales_cc', 'Sales Email CC -- orders only (optional)', values),
+            ('email_partial_order', 'Partial Order Alerts ONLY (optional)', values),
         ])
         self._section(body, 'Item Images (only if this machine runs Item Image Sync)', [
             ('images_base_url', 'Image Host Base URL', values),
