@@ -106,7 +106,15 @@ def items():
             l_consecutive_failures = 0
 
             if 'ResourceError' in l_item.keys() or 'UnitPrice' not in (l_item.get('ItemPrice') or {}):
-                log_error('Item not found in API (or unexpected response shape): ' + row.item_code + ' -- ' + str(l_item))
+                # One line per item, not P21's full stack trace.
+                l_err = l_item.get('ResourceError')
+                l_err_msg = l_err.get('ErrorMessage', '') if isinstance(l_err, dict) else str(l_err or '')
+                if 'This item ID is not valid' in l_err_msg:
+                    log_error('Item not valid in P21: ' + row.item_code)
+                elif l_err is not None:
+                    log_error('Item not found in API: ' + row.item_code + ' -- ' + l_err_msg)
+                else:
+                    log_error('Unexpected price response for item ' + row.item_code + ' -- ' + str(l_item)[:500])
                 l_err_cnt += 1
                 l_err_items.append(row.item_code)
             else:
@@ -120,6 +128,8 @@ def items():
                             l_succ_cnt += 1
                         except Exception as e:
                             log_error(e)
+                    else:
+                        log_info('No update: P21 returned $0.00 for item: ' + str(row.item_code) + ' (keeping existing price ' + l_old_price + ')')
                 else:
                     log_debug('No update: price is the same for item: ' + str(row.item_code))
 
