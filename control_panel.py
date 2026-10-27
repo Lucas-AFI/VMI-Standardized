@@ -46,6 +46,10 @@ SERVICE_NAME = _credentials.SERVICE_NAME
 
 DEFAULT_IMAGE_FOLDER = r'C:\Program Files (x86)\MATRIX-TM\Images\ItemPictures'
 
+HHMM = r'^([01]\d|2[0-3]):[0-5]\d$'
+# Scheduled Tasks tab: tasks that run once a day, and the time pre-filled in the prompt.
+DAILY_DEFAULT_TIMES = {'price_sync': '01:00', 'orders': '10:30', 'images': '02:00', 'catalog': '03:00'}
+
 LOGO_PATH = os.path.join(SCRIPT_DIR, 'assets', 'afi_logo.png')
 ICON_PATH = os.path.join(SCRIPT_DIR, 'assets', 'afi_icon.png')
 
@@ -520,22 +524,16 @@ class ScheduledTasksTab(ttk.Frame):
         if values is None:
             return
 
-        if key in ('price_sync', 'orders'):
-            minutes = values.get('minutes', '')
-            if not minutes.isdigit() or int(minutes) <= 0:
-                messagebox.showerror('Invalid interval', 'Enter a whole number of minutes.')
-                return
-            schedule_args = task_scheduler.schedule_args_minute(int(minutes))
-        elif key in ('images', 'catalog'):
+        if key in DAILY_DEFAULT_TIMES:
             t = values.get('time', '')
-            if not re.match(r'^\d{2}:\d{2}$', t):
-                messagebox.showerror('Invalid time', 'Enter time as HH:MM.')
+            if not re.match(HHMM, t):
+                messagebox.showerror('Invalid time', 'Enter time as HH:MM, 24-hour (e.g. 06:00 or 18:30).')
                 return
             schedule_args = task_scheduler.schedule_args_daily(t)
         elif key == 'script_updates':
             t = values.get('time', '')
-            if not re.match(r'^\d{2}:\d{2}$', t):
-                messagebox.showerror('Invalid time', 'Enter time as HH:MM.')
+            if not re.match(HHMM, t):
+                messagebox.showerror('Invalid time', 'Enter time as HH:MM, 24-hour (e.g. 06:00 or 18:30).')
                 return
             schedule_args = task_scheduler.schedule_args_monthly_on_day(1, t)
         else:  # health
@@ -573,20 +571,12 @@ class ScheduledTasksTab(ttk.Frame):
         entries = {}
         row = 0
 
-        if key in ('price_sync', 'orders'):
-            ttk.Label(win, text='Run every N minutes.\nConfirm the right interval against a reference client\n'
-                                  'machine first -- DEPLOYMENT.md notes this isn\'t fixed anywhere.',
-                       justify='left').grid(row=row, column=0, columnspan=2, sticky='w', padx=10, pady=(10, 4))
-            row += 1
-            entries['minutes'] = ttk.Entry(win)
-            entries['minutes'].grid(row=row, column=0, padx=10, pady=4, sticky='w')
-            row += 1
-        elif key in ('images', 'catalog'):
-            ttk.Label(win, text='Time of day to run (HH:MM, 24-hour):').grid(
+        if key in DAILY_DEFAULT_TIMES:
+            ttk.Label(win, text='Runs once a day. Time of day to run (HH:MM, 24-hour):').grid(
                 row=row, column=0, sticky='w', padx=10, pady=(10, 4))
             row += 1
             entries['time'] = ttk.Entry(win)
-            entries['time'].insert(0, '02:00')
+            entries['time'].insert(0, DAILY_DEFAULT_TIMES[key])
             entries['time'].grid(row=row, column=0, padx=10, pady=4, sticky='w')
             row += 1
         elif key == 'script_updates':
