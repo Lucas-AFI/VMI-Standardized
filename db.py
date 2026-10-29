@@ -125,6 +125,12 @@ def get_orders(l_cursor):
     #this table might ever contain is excluded by default unless it's
     #explicitly, unambiguously Opened. Both this and send_erp = 0 are
     #required together; neither replaces the other.
+    #
+    #Only POs ordered today or yesterday (calendar days, SQL Server's clock).
+    #Incident, 2026-10: machines where Auto Orders had been broken for months
+    #had a backlog of Opened, unsent POs; a fresh install sent all of them.
+    #Yesterday is included for a PO built after that day's scheduled run. A
+    #PO older than that, or with no order date, is never sent automatically.
     try:
         l_cursor.execute(
             'select distinct po_key, po_code, po_ordered_date '
@@ -134,6 +140,7 @@ def get_orders(l_cursor):
             'and supplier_key = ' + str(SUPPLIER_KEY) + ' '
             'and bool_bitul = 0 '
             'and status_key = 1 '
+            'and po_ordered_date >= dateadd(day, -1, cast(getdate() as date)) '
             'and po_key not in (select po_key from dbo.erp_send_state)'
         )
     except Error as e:
