@@ -161,9 +161,15 @@ def build_payload():
         for r in l_events
     ]
 
+    # Deliberately NOT keyed off l_run_log's last_status: that's persisted
+    # state in health_state.db that only gets overwritten the next time that
+    # specific run_type runs again (catalog/images often only once a day,
+    # not every 15-min heartbeat). A single transient failure there used to
+    # pin current_status='error' indefinitely with no live event to show why
+    # -- every real failure path already calls health.record_event() in the
+    # same except block, so the events check below already catches it.
     l_has_error = (
         any(e['event_type'] in ('order_error', 'partial_order', 'db_error', 'api_error', 'run_failure', 'email_failure', 'order_submission_error') for e in l_event_dicts)
-        or any(r.get('last_status') == 'error' for r in l_run_log.values())
         or len(l_stale) > 0
     )
 

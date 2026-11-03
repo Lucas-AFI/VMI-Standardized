@@ -30,8 +30,10 @@ import health
 
 # Single attempt, generous timeout -- the payload here is the full item
 # catalog (potentially thousands of rows), unlike health_reporter.py's small
-# heartbeat, so it needs more margin than a quick status ping would.
-CATALOG_REQUEST_TIMEOUT = 30
+# heartbeat, so it needs more margin than a quick status ping would. Bumped
+# from 30s after a "Read timed out" at the scheduled 03:00 run. Stays under
+# Azure App Service's 230s request limit.
+CATALOG_REQUEST_TIMEOUT = 120
 
 
 def build_catalog_payload(p_rows):
