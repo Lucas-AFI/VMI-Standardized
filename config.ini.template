@@ -15,6 +15,7 @@ email_to = VMI@afi-tools.com
 email_cc =
 email_sales_cc =
 email_partial_order =
+email_order_copy =
 
 [images]
 base_url =

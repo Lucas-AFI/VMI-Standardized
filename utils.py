@@ -185,7 +185,7 @@ def _send_email_with_retry(p_msg, p_all_recip):
     raise l_last_exc
 
 
-def email(p_subject, p_message="", p_log=True, p_attach=True, p_sales_cc=False, p_extra_to=None, p_attachments=None):
+def email(p_subject, p_message="", p_log=True, p_attach=True, p_sales_cc=False, p_extra_to=None, p_attachments=None, p_only_to=None):
     """
     Send email notification with optional log file attachment.
 
@@ -202,6 +202,9 @@ def email(p_subject, p_message="", p_log=True, p_attach=True, p_sales_cc=False, 
         p_extra_to : extra To addresses for this one email only (e.g.
                      email_partial_order on the partial-order alert)
         p_attachments : list of (filename, bytes) to attach
+        p_only_to  : send to exactly these addresses and nobody else -- no
+                     email_to, no Cc (e.g. email_order_copy, which may be a
+                     customer contact who shouldn't see internal addresses)
 
     Never raises. Retries transient connection failures; on total failure
     (retries exhausted, or a non-retryable rejection like bad auth or a
@@ -216,8 +219,11 @@ def email(p_subject, p_message="", p_log=True, p_attach=True, p_sales_cc=False, 
     successfully-submitted order's erp_send_state stuck 'inflight' just
     because the *notification* about it failed.
     """
-    l_to = list(dict.fromkeys(get_email_to() + (p_extra_to or [])))
-    l_cc = [a for a in dict.fromkeys(get_email_cc() + (get_email_sales_cc() if p_sales_cc else [])) if a not in l_to]
+    if p_only_to:
+        l_to, l_cc = list(dict.fromkeys(p_only_to)), []
+    else:
+        l_to = list(dict.fromkeys(get_email_to() + (p_extra_to or [])))
+        l_cc = [a for a in dict.fromkeys(get_email_cc() + (get_email_sales_cc() if p_sales_cc else [])) if a not in l_to]
     l_all_recip = l_to + l_cc
 
     msg = MIMEMultipart()

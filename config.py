@@ -81,6 +81,12 @@ def get_email_partial_order():
     raw = _get('email', 'email_partial_order', fallback='')
     return [addr.strip() for addr in raw.split(',') if addr.strip()]
 
+def get_email_order_copy():
+    # Receives ONLY an itemized copy (.xlsx) of each order created in P21 --
+    # see send_order_copy() in main.py.
+    raw = _get('email', 'email_order_copy', fallback='')
+    return [addr.strip() for addr in raw.split(',') if addr.strip()]
+
 
 # Images
 

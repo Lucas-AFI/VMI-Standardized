@@ -18,7 +18,7 @@ from collections import Counter
 import traceback
 from log import configure_logs, log_debug, log_info, log_error, start_log, stop_log, log_shutdown, set_level
 from utils import coalesce, email, rename_log, check_order, get_contract, classify_dropped_item, build_xlsx
-from config import get_email_partial_order
+from config import get_email_partial_order, get_email_order_copy
 from db import connect_db, close_db_conn, get_items, update_item, get_orders, get_order_items, update_order, mark_inflight, clear_inflight, get_stale_inflight, record_open_order, get_open_orders, clear_open_order, clear_stale_by_po_code
 from api import get_item, get_customer_name, create_order, approve_order, check_item_availability, get_order_status
 from xml_processor import build_order, add_line_item, print_xml
@@ -164,16 +164,9 @@ def build_partial_order_alert(p_customer, p_order, p_order_no, p_order_items, p_
     ordered is decided per line by consuming p_dropped_item_ids, so the same
     item code on two lines where only one was dropped is still split right.
     """
-    l_dropped_left = Counter(p_dropped_item_ids)
-    l_dropped_rows, l_ordered_rows = [], []
-    for r in p_order_items:
-        l_qty = float(r.qty or 0)
-        l_row = [r.item_code, int(l_qty) if l_qty.is_integer() else l_qty, r.item_description or '']
-        if l_dropped_left[r.item_code] > 0:
-            l_dropped_left[r.item_code] -= 1
-            l_dropped_rows.append(l_row)
-        else:
-            l_ordered_rows.append(l_row)
+    l_dropped, l_ordered = _split_dropped(p_order_items, p_dropped_item_ids)
+    l_dropped_rows = [[r.item_code, _num(r.qty), r.item_description or ''] for r in l_dropped]
+    l_ordered_rows = [[r.item_code, _num(r.qty), r.item_description or ''] for r in l_ordered]
 
     l_header = ['Item #', 'Qty Ordered', 'Item Description']
     l_xlsx = build_xlsx([
@@ -181,11 +174,8 @@ def build_partial_order_alert(p_customer, p_order, p_order_no, p_order_items, p_
         ('Ordered Items', l_header, l_ordered_rows),
     ])
 
-    l_safe_customer = ''.join(c for c in p_customer if c not in '\\/:*?"<>|').strip()
-    l_xlsx_name = str(p_order_no) + '_' + l_safe_customer + '.xlsx'
-
-    l_date = getattr(p_order, 'po_ordered_date', None)
-    l_date = l_date.strftime('%m/%d/%Y') if hasattr(l_date, 'strftime') else str(l_date or '')
+    l_xlsx_name = _xlsx_name(p_order_no, p_customer)
+    l_date = _order_date(p_order)
 
     l_subject = 'Partial Order Alert - ' + p_customer + ' - P21 Order ' + str(p_order_no)
     l_body = (
@@ -198,6 +188,75 @@ def build_partial_order_alert(p_customer, p_order, p_order_no, p_order_items, p_
         'The dropped and ordered items are listed in the attached spreadsheet (' + l_xlsx_name + ').\n'
     )
     return l_subject, l_body, l_xlsx_name, l_xlsx
+
+
+def build_order_copy(p_customer, p_order, p_order_no, p_order_items, p_dropped_item_ids):
+    """
+    Subject, body, attachment filename and .xlsx bytes for the itemized
+    order copy sent to email_order_copy. Lists only the lines P21 actually
+    took (dropped lines excluded). Prices are the Matrix PO line prices
+    (ENT_PO_DETAILS.unit_price) -- P21's order reply doesn't include prices.
+    """
+    _, l_ordered = _split_dropped(p_order_items, p_dropped_item_ids)
+    l_date = _order_date(p_order)
+    l_po = str(p_order.po_code or '')
+
+    l_rows, l_total = [], 0.0
+    for r in l_ordered:
+        l_price = float(r.unit_price or 0)
+        l_line_total = round(float(r.qty or 0) * l_price, 2)
+        l_total += l_line_total
+        l_rows.append([str(p_order_no), l_po, l_date, r.item_code, r.item_description or '',
+                       _num(r.qty), _num(l_price), l_line_total])
+    l_total = round(l_total, 2)
+    l_rows.append(['', '', '', '', 'Total', '', '', l_total])
+
+    l_xlsx = build_xlsx([('Order ' + str(p_order_no), [
+        'P21 Order No', 'PO Number', 'Date Ordered', 'Item #', 'Item Description',
+        'Qty', 'Unit Price', 'Line Total'], l_rows)])
+    l_xlsx_name = _xlsx_name(p_order_no, p_customer)
+
+    l_subject = 'Order Copy - ' + p_customer + ' - P21 Order ' + str(p_order_no)
+    l_body = (
+        'Order placed for ' + p_customer + '.\n\n'
+        'P21 Order No: ' + str(p_order_no) + '\n'
+        'PO Number: ' + l_po + '\n'
+        'Date Ordered: ' + l_date + '\n'
+        'Items: ' + str(len(l_ordered)) + '\n'
+        'Total: ${:,.2f}'.format(l_total) + '\n\n'
+        'The itemized order is attached (' + l_xlsx_name + ').\n'
+    )
+    return l_subject, l_body, l_xlsx_name, l_xlsx
+
+
+def _split_dropped(p_order_items, p_dropped_item_ids):
+    # (dropped_rows, ordered_rows), decided per line by consuming the
+    # dropped item codes -- the same item on two lines where only one was
+    # dropped is still split right.
+    l_dropped_left = Counter(p_dropped_item_ids)
+    l_dropped, l_ordered = [], []
+    for r in p_order_items:
+        if l_dropped_left[r.item_code] > 0:
+            l_dropped_left[r.item_code] -= 1
+            l_dropped.append(r)
+        else:
+            l_ordered.append(r)
+    return l_dropped, l_ordered
+
+
+def _num(p_val):
+    l_val = float(p_val or 0)
+    return int(l_val) if l_val.is_integer() else l_val
+
+
+def _order_date(p_order):
+    l_date = getattr(p_order, 'po_ordered_date', None)
+    return l_date.strftime('%m/%d/%Y') if hasattr(l_date, 'strftime') else str(l_date or '')
+
+
+def _xlsx_name(p_order_no, p_customer):
+    l_safe_customer = ''.join(c for c in p_customer if c not in '\\/:*?"<>|').strip()
+    return str(p_order_no) + '_' + l_safe_customer + '.xlsx'
 
 
 def _order_is_resolved(p_order_status):
@@ -408,6 +467,13 @@ def orders(p_quote=None):
                     else:
                         update_order(l_cursor, l_order.po_key)
                         log_info('Order created: P21 OrderNo = ' + l_order_no + ' and po_code = ' + str(l_order.po_code))
+
+                    l_copy_to = get_email_order_copy()
+                    if l_copy_to and not p_quote:
+                        l_subject, l_body, l_xlsx_name, l_xlsx = build_order_copy(
+                            get_customer_name(), l_order, l_order_no, l_order_items, l_dropped_item_ids
+                        )
+                        email(l_subject, l_body, False, p_only_to=l_copy_to, p_attachments=[(l_xlsx_name, l_xlsx)])
 
                     clear_inflight(l_cursor, l_order.po_key)
                     if not p_quote:

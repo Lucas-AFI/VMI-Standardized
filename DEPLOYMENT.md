@@ -89,6 +89,7 @@ It will prompt for:
 | Email CC | `[email] email_cc` | Optional, comma-separated. Cc'd on every email |
 | Sales Email CC | `[email] email_sales_cc` | Optional, comma-separated. Cc'd only on order-related emails (Auto Orders) -- never pricing/error reports |
 | Partial Order Alerts ONLY | `[email] email_partial_order` | Optional, comma-separated. Receives only the partial-order alert (with the `{orderno}_{customer}.xlsx` attachment) -- no other order emails. For a sales rep who just wants dropped-item alerts |
+| Itemized Order Copy ONLY | `[email] email_order_copy` | Optional, comma-separated. Gets an `{orderno}_{customer}.xlsx` copy of every order created in P21 (items, qty, prices, total, order/PO number, date). Sent to these addresses only -- no internal To/Cc. Prices are the Matrix PO line prices |
 
 **Item Images** (only required if this machine will run Item Image Sync)
 | Field | config.ini key | Notes |

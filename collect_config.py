@@ -102,6 +102,7 @@ def collect():
     email_cc = prompt('Email CC (optional, press Enter to skip)', '')
     email_sales_cc = prompt('Sales Email CC -- order emails only, not pricing/error reports (optional, press Enter to skip)', '')
     email_partial_order = prompt('Partial Order Alerts ONLY -- receives just the partial-order alert (optional, press Enter to skip)', '')
+    email_order_copy = prompt('Itemized Order Copy ONLY -- receives an .xlsx copy of each order (optional, press Enter to skip)', '')
 
     # Images
     print()
@@ -156,6 +157,7 @@ def collect():
         'email_cc': email_cc,
         'email_sales_cc': email_sales_cc,
         'email_partial_order': email_partial_order,
+        'email_order_copy': email_order_copy,
     }
 
     config['images'] = {
@@ -212,6 +214,7 @@ def collect():
     print(f'  Email CC       : {email_cc or "(not set)"}')
     print(f'  Sales Email CC : {email_sales_cc or "(not set)"}')
     print(f'  Partial Alerts : {email_partial_order or "(not set)"}')
+    print(f'  Order Copy     : {email_order_copy or "(not set)"}')
     print(f'  Image Base URL : {image_base_url}')
     print(f'  Image Folder   : {local_image_folder}')
     print(f'  Health Client  : {health_client_name}')
