@@ -35,7 +35,7 @@ from urllib.error import URLError, HTTPError
 
 import config          # existing standardized-repo module: reads config.ini
 import credentials      # existing standardized-repo module: keyring wrapper
-from db import connect_db, close_db_conn  # read-only use here
+from db import connect_db, close_db_conn, get_below_min  # read-only use here
 
 # Absolute, resolved off this file's own location -- not the process cwd. This
 # script has its own, separate Task Scheduler entry from main.py by design
@@ -150,6 +150,35 @@ def get_stale_pending_orders():
         return []
 
 
+def get_below_min_items():
+    """
+    Live view of Matrix's stock shortage report (AFI items below min), sent
+    every heartbeat. None = couldn't read it (e.g. an older Matrix without
+    V_REPORT_SHORTAGE) -- distinct from [] = nothing below min. Never alerts
+    by itself: the order-time check is main.py's check_missed_items().
+    """
+    try:
+        l_conn = connect_db()
+        try:
+            l_rows = get_below_min(l_conn.cursor())
+        finally:
+            close_db_conn(l_conn)
+    except Exception as e:
+        _log('Below-min list skipped: ' + str(e))
+        return None
+
+    def _v(x):
+        if x is None or isinstance(x, (int, float, str)):
+            return x.strip() if isinstance(x, str) else x
+        if hasattr(x, 'isoformat'):
+            return x.isoformat()
+        return float(x)   # Decimal
+
+    l_cols = ('item_code', 'item_description', 'cabinet_name', 'bin_code', 'stock_qty',
+              'min_stock', 'max_stock', 'ordered_qty', 'last_issue')
+    return [{c: _v(getattr(r, c)) for c in l_cols} for r in l_rows]
+
+
 def build_payload():
     l_run_log = get_run_log()
     l_events = get_unreported_events()
@@ -185,6 +214,7 @@ def build_payload():
         'run_log': l_run_log,
         'events': l_event_dicts,
         'stale_pending_orders': l_stale,
+        'below_min': get_below_min_items(),
     }
     return l_payload, [e['event_id'] for e in l_event_dicts]
 

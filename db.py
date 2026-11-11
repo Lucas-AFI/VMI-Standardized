@@ -115,6 +115,41 @@ def get_catalog_items(l_cursor):
     return l_cursor.fetchall()
 
 
+# Matrix's own stock shortage report (V_REPORT_SHORTAGE: stock below min at
+# cabinet/bin/item/site level), limited to AFI items. Callers catch errors --
+# both uses are diagnostics and must never stop Price Sync or Auto Orders.
+SHORTAGE_SQL = (
+    'select s.item_key, s.item_code, s.item_description, s.cabinet_name, s.bin_code, '
+    's.stock_qty, s.min_stock, s.max_stock, s.ordered_qty, s.last_issue '
+    'from dbo.V_REPORT_SHORTAGE s '
+    'where s.item_key in (select item_key from dbo.ent_item_suppliers '
+    'where supplier_key = ' + str(SUPPLIER_KEY) + ' and bool_bitul = 0)'
+)
+
+
+def get_below_min(l_cursor):
+    l_cursor.execute(SHORTAGE_SQL + ' order by s.item_code')
+    return l_cursor.fetchall()
+
+
+def get_missed_items(l_cursor, p_po_keys):
+    #Below-min items Matrix should have put on these order(s) but didn't:
+    #nothing on order, on no open PO, orderable, and not touched since the
+    #order lines were created (so a dispense after order generation -- which
+    #tomorrow's order will cover -- never counts as a miss).
+    l_keys = ','.join(str(int(k)) for k in p_po_keys)
+    l_cursor.execute(
+        SHORTAGE_SQL +
+        ' and isnull(s.no_order, 0) = 0'
+        ' and isnull(s.ordered_qty, 0) = 0'
+        ' and s.item_key not in (select item_key from dbo.vOpenOrders)'
+        ' and (s.last_issue is null or s.last_issue < '
+        '(select max(date_created) from dbo.ent_po_details where po_key in (' + l_keys + ')))'
+        ' order by s.item_code'
+    )
+    return l_cursor.fetchall()
+
+
 def get_orders(l_cursor):
     #Fetch all pending orders not yet sent to ERP, excluding any currently
     #marked in-flight in erp_send_state (crash/duplicate-submission guard --

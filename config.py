@@ -87,6 +87,12 @@ def get_email_order_copy():
     raw = _get('email', 'email_order_copy', fallback='')
     return [addr.strip() for addr in raw.split(',') if addr.strip()]
 
+def get_email_missed_items():
+    # Receives ONLY the alert for below-min items Matrix left off an order --
+    # see check_missed_items() in main.py.
+    raw = _get('email', 'email_missed_items', fallback='')
+    return [addr.strip() for addr in raw.split(',') if addr.strip()]
+
 
 # Images
 

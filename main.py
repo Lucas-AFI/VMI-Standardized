@@ -15,11 +15,12 @@ from argparse import ArgumentParser
 from sys import exit
 from time import sleep
 from collections import Counter
+from math import ceil
 import traceback
-from log import configure_logs, log_debug, log_info, log_error, start_log, stop_log, log_shutdown, set_level
+from log import configure_logs, log_debug, log_info, log_warning, log_error, start_log, stop_log, log_shutdown, set_level
 from utils import coalesce, email, rename_log, check_order, get_contract, classify_dropped_item, build_xlsx
-from config import get_email_partial_order, get_email_order_copy
-from db import connect_db, close_db_conn, get_items, update_item, get_orders, get_order_items, update_order, mark_inflight, clear_inflight, get_stale_inflight, record_open_order, get_open_orders, clear_open_order, clear_stale_by_po_code
+from config import get_email_partial_order, get_email_order_copy, get_email_missed_items
+from db import connect_db, close_db_conn, get_items, update_item, get_orders, get_order_items, update_order, mark_inflight, clear_inflight, get_stale_inflight, record_open_order, get_open_orders, clear_open_order, clear_stale_by_po_code, get_missed_items
 from api import get_item, get_customer_name, create_order, approve_order, check_item_availability, get_order_status
 from xml_processor import build_order, add_line_item, print_xml
 from images import sync_images
@@ -374,6 +375,57 @@ def confirm_order_created(p_order_no):
     return False
 
 
+def check_missed_items(l_cursor, p_orders):
+    # Items below min that Matrix left off this run's order(s) -- see
+    # get_missed_items() in db.py. Diagnostic only: never blocks the orders.
+    # Returns the missed rows ([] if none or the check failed).
+    try:
+        l_rows = get_missed_items(l_cursor, [o.po_key for o in p_orders])
+    except Exception as e:
+        log_warning('Missed-item check skipped: ' + str(e))
+        return []
+    if not l_rows:
+        return []
+    l_po_codes = ', '.join(str(o.po_code or o.po_key) for o in p_orders)
+    l_detail = (str(len(l_rows)) + ' item(s) below min but not on order ' + l_po_codes +
+                ' or any other open PO:\n' + '\n'.join(_missed_line(r) for r in l_rows))
+    log_warning(l_detail)
+    health.record_event('missed_items', l_detail, l_po_codes)
+    return l_rows
+
+
+def _qty_to_order(r):
+    # Up to max, as Matrix orders -- rounded up to a whole unit.
+    return max(1, ceil(float(r.max_stock or 0) - float(r.stock_qty or 0) - float(r.ordered_qty or 0)))
+
+
+def _missed_line(r):
+    l_where = ' / '.join(str(x).strip() for x in (r.cabinet_name, r.bin_code) if x and str(x).strip())
+    return (str(r.item_code).strip() + ' -- qty to order ' + str(_qty_to_order(r)) +
+            ' (stock ' + str(_num(r.stock_qty)) + ', min ' + str(_num(r.min_stock)) +
+            ', max ' + str(_num(r.max_stock)) + ')' + (' [' + l_where + ']' if l_where else '') +
+            ' -- last issue ' + (r.last_issue.strftime('%Y-%m-%d %H:%M') if r.last_issue else 'never'))
+
+
+def build_missed_items_email(p_customer, p_sent, p_rows):
+    """Subject and body of the missed below-min alert (email_missed_items).
+    p_sent: [(P21 order no, order item rows)] for this run's created orders."""
+    l_order_nos = ', '.join(n for n, _ in p_sent)
+    l_subject = (p_customer + ' Order ' + l_order_nos + ' ' +
+                 ('Missing Multiple Below Min Items' if len(p_rows) > 1
+                  else 'Missing Below Min Item ' + str(p_rows[0].item_code).strip()))
+    l_body = [p_customer + ': Matrix created order ' + l_order_nos + ' but left off ' + str(len(p_rows)) +
+              ' item(s) that are below min and not on any other open PO.', '']
+    for l_no, l_items in p_sent:
+        l_body.append('ORDER ' + l_no + ' ITEMS (item -- qty -- description)')
+        l_body += ['  ' + str(r.item_code).strip() + ' -- ' + str(_num(r.qty)) + ' -- ' + (r.item_description or '')
+                   for r in l_items]
+        l_body.append('')
+    l_body.append('MISSING BELOW MIN ITEMS')
+    l_body += ['  ' + _missed_line(r) for r in p_rows]
+    return l_subject, '\n'.join(l_body)
+
+
 def orders(p_quote=None):
     # Submit pending Matrix purchase orders to P21
     l_tot_cnt = 0
@@ -418,6 +470,9 @@ def orders(p_quote=None):
             stop_log('Create New Orders process', 0, 0)
             rename_log()
             exit()
+
+        l_missed = check_missed_items(l_cursor, l_orders)
+        l_sent = []   # (P21 order no, order items) -- for the missed-items email
 
         for l_order in l_orders:
             l_tot_cnt += 1
@@ -515,6 +570,7 @@ def orders(p_quote=None):
                         email(l_subject, l_body, False, p_only_to=l_copy_to, p_attachments=[(l_xlsx_name, l_xlsx)])
 
                     clear_inflight(l_cursor, l_order.po_key)
+                    l_sent.append((l_order_no, l_order_items))
                     if not p_quote:
                         record_open_order(l_cursor, l_order.po_key, str(l_order.po_code or ''), l_order_no)
                     health.record_event(
@@ -542,6 +598,11 @@ def orders(p_quote=None):
 
         close_db_conn(l_db_conn)
         stop_log('Create New Orders process', l_succ_cnt, l_tot_cnt)
+
+        l_missed_to = get_email_missed_items()
+        if l_missed and l_sent and l_missed_to and not p_quote:
+            l_subject, l_body = build_missed_items_email(get_customer_name(), l_sent, l_missed)
+            email(l_subject, l_body, False, p_only_to=l_missed_to)
 
         health.record_run('orders', 'success', l_succ_cnt, l_tot_cnt)
 

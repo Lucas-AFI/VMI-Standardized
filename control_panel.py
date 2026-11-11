@@ -72,6 +72,7 @@ CONFIG_FIELDS = {
     'email_sales_cc':              ('email', 'email_sales_cc', ''),
     'email_partial_order':         ('email', 'email_partial_order', ''),
     'email_order_copy':            ('email', 'email_order_copy', ''),
+    'email_missed_items':          ('email', 'email_missed_items', ''),
     'images_base_url':            ('images', 'base_url', ''),
     'images_local_folder':      ('images', 'local_folder', DEFAULT_IMAGE_FOLDER),
     'health_client_name':        ('health', 'client_name', ''),
@@ -157,6 +158,7 @@ def save_config_values(values):
         'email_sales_cc': values['email_sales_cc'],
         'email_partial_order': values['email_partial_order'],
         'email_order_copy': values['email_order_copy'],
+        'email_missed_items': values['email_missed_items'],
     }
     cp['images'] = {
         'base_url': values['images_base_url'],
@@ -284,6 +286,7 @@ class ConfigureTab(ttk.Frame):
             ('email_sales_cc', 'Sales Email CC -- orders only (optional)', values),
             ('email_partial_order', 'Partial Order Alerts ONLY (optional)', values),
             ('email_order_copy', 'Itemized Order Copy ONLY (optional)', values),
+            ('email_missed_items', 'Missed Below-Min Item Alerts ONLY (optional)', values),
         ])
         self._section(body, 'Item Images (only if this machine runs Item Image Sync)', [
             ('images_base_url', 'Image Host Base URL', values),
