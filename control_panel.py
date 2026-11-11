@@ -410,7 +410,7 @@ class RunTab(ttk.Frame):
         ('Auto Orders (Quotes)', [sys.executable, 'main.py', '-a', 'orders', '-q']),
         ('Item Image Sync', [sys.executable, 'matrix_image_save.py']),
         ('Catalog Sync', [sys.executable, 'main.py', '-a', 'catalog']),
-        ('Item ID Report (no changes)', [sys.executable, 'fix_item_ids.py']),
+        ('Item ID Update (check only)', [sys.executable, 'fix_item_ids.py']),
         ('Health Reporter (single run)', [sys.executable, 'health_reporter.py']),
         ('Verify Config/Credentials', [sys.executable, 'collect_config.py', '--verify']),
         ('Pull Latest Updates', ['cmd', '/c', 'update_scripts.bat']),
@@ -437,6 +437,7 @@ class RunTab(ttk.Frame):
         extra = [
             ('Clear Stale PO...', self._clear_stale),
             ('Export Dropped Items...', self._export_dropped),
+            ('Item ID Update & Apply...', self._item_ids_apply),
         ]
         for j, (label, handler) in enumerate(extra):
             i = len(self.ACTIONS) + j
@@ -458,6 +459,19 @@ class RunTab(ttk.Frame):
         if days:
             runner.start(f'Export Dropped Items (last {days}d)',
                          [sys.executable, 'export_dropped_items.py', '--days', str(days)])
+
+    def _item_ids_apply(self, runner):
+        if messagebox.askyesno(
+            'Item ID Update & Apply',
+            "This renames every Matrix item code that P21 has replaced with a single\n"
+            "new ID (status 'ready' in the check-only report). Conflicts and items\n"
+            "with no replacement are left alone.\n\n"
+            "Every rename is logged and can be reversed with:\n"
+            "    python fix_item_ids.py --undo\n\n"
+            "Run 'Item ID Update (check only)' first if you haven't. Continue?",
+            parent=self
+        ):
+            runner.start('Item ID Update & Apply', [sys.executable, 'fix_item_ids.py', '--apply'])
 
 
 class ScheduledTasksTab(ttk.Frame):
@@ -589,6 +603,11 @@ class ScheduledTasksTab(ttk.Frame):
             row += 1
         elif key in MONTHLY_DEFAULTS:
             l_day, l_time = MONTHLY_DEFAULTS[key]
+            if key == 'item_ids':
+                ttk.Label(win, text="Checks AND applies: renames Matrix item codes P21 has replaced, then\n"
+                                      "emails a summary. Same as Run > 'Item ID Update & Apply'.",
+                           justify='left').grid(row=row, column=0, sticky='w', padx=10, pady=(10, 0))
+                row += 1
             ttk.Label(win, text='Time of day to run on the ' + {1: '1st', 2: '2nd', 3: '3rd'}.get(l_day, str(l_day) + 'th') +
                                 ' of each month (HH:MM):').grid(
                 row=row, column=0, sticky='w', padx=10, pady=(10, 4))

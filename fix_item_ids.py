@@ -10,13 +10,14 @@ Usage (from the VMI folder):
 Monthly scheduled task: python main.py -a item_ids (same as --apply, plus
 log/email/health -- see item_ids() in main.py).
 
-Report: fix_item_ids_report.csv. Status values:
+Report: logs/item_ids_<date>_<time>.xlsx (every run, scheduled or manual). Status values:
     ready      -- one clear replacement, safe to rename
     updated    -- renamed (--apply)
     conflict   -- new ID is already a Matrix item code, two old codes map to
                   it, or it's too long for Matrix; a person decides
-    no match   -- P21 has no replacement on file; manual lookup
-    error      -- lookup or update failed; rerun
+    no match   -- P21 has no replacement on file; Reason says why (e.g.
+                  marked for deletion in P21, or not in P21 at all)
+    error      -- rename failed; rerun
 
 Only ENT_ITEM_MASTER.ITEM_CODE changes. Matrix links POs, stock, etc. by
 item_key, so history stays attached. Every rename is logged in
@@ -24,38 +25,17 @@ dbo.vmi_item_code_changes (created on first --apply), which --undo reads.
 """
 
 import argparse
-import csv
 from collections import Counter
 from datetime import datetime
-from os import path
 
+import log
 from db import connect_db, close_db_conn, get_items
-from item_id_lookup import odata, lookup
+from item_id_lookup import explain
 from price_lookup import p21_token
 from utils import build_xlsx
 
-BATCH = 40   # item IDs per P21 existence check (keeps the URL short)
 LOG_TABLE = 'dbo.vmi_item_code_changes'
-HEADER = ['Item Key', 'Old Item #', 'New Item #', 'New Item Description', 'Status', 'Note']
-
-
-def _progress(p_on, p_text):
-    if p_on:
-        print('\r' + p_text, end='', flush=True)
-
-
-def p21_live_ids(p_headers, p_codes, p_progress=True):
-    # Upper-cased set of the codes P21 has as live (not deleted) items.
-    l_live = set()
-    for i in range(0, len(p_codes), BATCH):
-        l_batch = p_codes[i:i + BATCH]
-        l_filter = ' or '.join("item_id eq '" + c.replace("'", "''") + "'" for c in l_batch)
-        for l_item in odata(p_headers, 'p21_view_inv_mast', l_filter):
-            if l_item.get('delete_flag') != 'Y':
-                l_live.add(str(l_item['item_id']).strip().upper())
-        _progress(p_progress, 'Checked ' + str(min(i + BATCH, len(p_codes))) + '/' + str(len(p_codes)) + ' items in P21')
-    _progress(p_progress, '\n')
-    return l_live
+HEADER = ['Item Key', 'Old Item #', 'New Item #', 'New Item Description', 'Status', 'Reason']
 
 
 def scan(l_cursor, p_progress=True):
@@ -72,19 +52,13 @@ def scan(l_cursor, p_progress=True):
     l_max_len = (l_cursor.fetchone() or [30])[0] or 30
 
     l_headers = {'Authorization': 'Bearer ' + p21_token(), 'Accept': 'application/json'}
-    l_live = p21_live_ids(l_headers, sorted(set(l_items.values())), p_progress)
+    l_found = explain(l_headers, sorted(set(l_items.values())), p_progress)
 
     l_rows = []
-    l_bad = [(k, c) for k, c in l_items.items() if c.upper() not in l_live]
-    for n, (l_key, l_old) in enumerate(l_bad, 1):
-        try:
-            l_new, l_desc, l_note = lookup(l_headers, l_old)
-            l_status = 'ready' if l_new else 'no match'
-        except Exception as e:
-            l_new, l_desc, l_note, l_status = '', '', str(e)[:200], 'error'
-        l_rows.append([l_key, l_old, l_new, l_desc, l_status, l_note])
-        _progress(p_progress, 'Looked up ' + str(n) + '/' + str(len(l_bad)) + ' unrecognized items')
-    _progress(p_progress and l_bad, '\n')
+    for l_key, l_old in l_items.items():
+        if l_old in l_found:
+            l_new, l_desc, l_reason = l_found[l_old]
+            l_rows.append([l_key, l_old, l_new, l_desc, 'ready' if l_new else 'no match', l_reason])
 
     # A rename must not collide with an existing Matrix item code or with
     # another rename in this same batch, and must fit the column.
@@ -182,6 +156,17 @@ def report_xlsx(p_rows):
     return build_xlsx([('Item ID Changes', HEADER, p_rows)])
 
 
+def save_report(p_rows):
+    # Dated copy in logs\ (gitignored) -- kept even if the email fails, and
+    # never overwritten by the next run. Returns (path, xlsx bytes).
+    l_xlsx = report_xlsx(p_rows)
+    log.l_log_dir.mkdir(exist_ok=True)
+    l_path = str(log.l_log_dir / ('item_ids_' + datetime.now().strftime('%Y_%m_%d_%H%M%S') + '.xlsx'))
+    with open(l_path, 'wb') as f:
+        f.write(l_xlsx)
+    return l_path, l_xlsx
+
+
 def main():
     l_args = argparse.ArgumentParser(description='Find and rename Matrix item codes P21 has replaced.')
     l_args.add_argument('--apply', action='store_true', help="rename every 'ready' item")
@@ -205,11 +190,7 @@ def main():
     finally:
         close_db_conn(l_conn)
 
-    l_out = path.abspath('fix_item_ids_report.csv')
-    with open(l_out, 'w', newline='') as f:
-        w = csv.writer(f)
-        w.writerow(HEADER)
-        w.writerows(l_rows)
+    l_out, _ = save_report(l_rows)
 
     l_status = Counter(r[4] for r in l_rows)
     print(str(len(l_rows)) + ' item(s) not recognized by P21:')

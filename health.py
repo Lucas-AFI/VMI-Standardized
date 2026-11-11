@@ -69,11 +69,12 @@ def _connect():
             succ_cnt INTEGER,
             tot_cnt INTEGER,
             err_cnt INTEGER,
-            err_items TEXT
+            err_items TEXT,
+            err_reasons TEXT
         )
         """
     )
-    for l_column in ('err_cnt INTEGER', 'err_items TEXT'):
+    for l_column in ('err_cnt INTEGER', 'err_items TEXT', 'err_reasons TEXT'):
         try:
             # health_state.db already exists on ~150 client machines from
             # before these columns were added -- CREATE TABLE IF NOT EXISTS
@@ -184,7 +185,7 @@ def event_already_recorded(p_event_type, p_po_code):
         return False
 
 
-def record_run(p_run_type, p_status, p_succ_cnt=None, p_tot_cnt=None, p_err_cnt=None, p_err_items=None):
+def record_run(p_run_type, p_status, p_succ_cnt=None, p_tot_cnt=None, p_err_cnt=None, p_err_items=None, p_err_reasons=None):
     """
     Record that a run of 'items' or 'orders' completed, and how it went.
     p_status: 'success' or 'error'
@@ -198,18 +199,23 @@ def record_run(p_run_type, p_status, p_succ_cnt=None, p_tot_cnt=None, p_err_cnt=
                  Whatever isn't in this list on the next report is treated as
                  resolved (see health_reporter.py/intake()'s sync logic), so
                  this should always be the full current set, not a delta.
+    p_err_reasons: {item_code: reason} for p_err_items (e.g. "Marked for
+                   deletion in P21"), stored as JSON -- the dashboard shows it
+                   next to each erroring SKU. A separate field, not a change to
+                   err_items' shape, so an older dashboard just ignores it.
     """
     try:
         l_conn = _connect()
         l_conn.execute(
-            'INSERT INTO run_log (run_type, last_run_at, last_status, succ_cnt, tot_cnt, err_cnt, err_items) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?) '
+            'INSERT INTO run_log (run_type, last_run_at, last_status, succ_cnt, tot_cnt, err_cnt, err_items, err_reasons) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?) '
             'ON CONFLICT(run_type) DO UPDATE SET '
             'last_run_at=excluded.last_run_at, last_status=excluded.last_status, '
             'succ_cnt=excluded.succ_cnt, tot_cnt=excluded.tot_cnt, err_cnt=excluded.err_cnt, '
-            'err_items=excluded.err_items',
+            'err_items=excluded.err_items, err_reasons=excluded.err_reasons',
             (p_run_type, _now(), p_status, p_succ_cnt, p_tot_cnt, p_err_cnt,
-             json.dumps(p_err_items) if p_err_items is not None else None)
+             json.dumps(p_err_items) if p_err_items is not None else None,
+             json.dumps(p_err_reasons) if p_err_reasons is not None else None)
         )
         l_conn.commit()
         l_conn.close()

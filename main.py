@@ -58,6 +58,8 @@ def items():
     l_succ_cnt = 0
     l_err_cnt = 0
     l_err_items = []
+    l_err_reasons = {}   # item_code -> why it errored (log + dashboard)
+    l_invalid = []       # "item ID is not valid" -- reasons looked up after the loop
     l_consecutive_failures = 0
     l_pauses_used = 0
 
@@ -84,6 +86,7 @@ def items():
                 log_error('Price lookup failed for item ' + row.item_code + ' (connection issue, will retry next run): ' + str(e))
                 l_err_cnt += 1
                 l_err_items.append(row.item_code)
+                l_err_reasons[row.item_code] = 'Could not reach P21 (connection problem) -- retried next run'
                 l_consecutive_failures += 1
 
                 if l_consecutive_failures >= PRICE_CONSECUTIVE_FAILURE_THRESHOLD and l_pauses_used < PRICE_MAX_PAUSES_PER_RUN:
@@ -110,11 +113,16 @@ def items():
                 l_err = l_item.get('ResourceError')
                 l_err_msg = l_err.get('ErrorMessage', '') if isinstance(l_err, dict) else str(l_err or '')
                 if 'This item ID is not valid' in l_err_msg:
-                    log_error('Item not valid in P21: ' + row.item_code)
+                    l_invalid.append(row.item_code)   # logged with its reason after the loop
                 elif l_err is not None:
                     log_error('Item not found in API: ' + row.item_code + ' -- ' + l_err_msg)
+                    l_err_reasons[row.item_code] = (
+                        'P21 server error while pricing -- usually temporary'
+                        if 'target of an invocation' in l_err_msg else 'P21 error: ' + l_err_msg[:200]
+                    )
                 else:
                     log_error('Unexpected price response for item ' + row.item_code + ' -- ' + str(l_item)[:500])
+                    l_err_reasons[row.item_code] = 'Unexpected response from P21'
                 l_err_cnt += 1
                 l_err_items.append(row.item_code)
             else:
@@ -134,9 +142,10 @@ def items():
                     log_debug('No update: price is the same for item: ' + str(row.item_code))
 
         close_db_conn(l_db_conn)
+        l_err_reasons.update(explain_invalid_items(l_invalid))
         stop_log('Update process', l_succ_cnt, l_tot_cnt)
 
-        health.record_run('items', 'success', l_succ_cnt, l_tot_cnt, l_err_cnt, l_err_items)
+        health.record_run('items', 'success', l_succ_cnt, l_tot_cnt, l_err_cnt, l_err_items, l_err_reasons)
 
         email('Matrix Auto Price Changes for ' + get_customer_name())
         rename_log()
@@ -151,8 +160,38 @@ def items():
         l_traceback = traceback.format_exc()
         log_error('Unhandled exception in items():\n' + l_traceback)
         health.record_event('run_failure', l_traceback)
-        health.record_run('items', 'error', l_succ_cnt, l_tot_cnt, l_err_cnt, l_err_items)
+        health.record_run('items', 'error', l_succ_cnt, l_tot_cnt, l_err_cnt, l_err_items, l_err_reasons)
         raise
+
+
+def explain_invalid_items(p_codes):
+    # Why P21 rejected each item ID (marked for deletion / replaced / not in
+    # P21), logged one line per item. Extra P21 lookups, batched (~3 calls per
+    # 40 items). Diagnostic only: any failure falls back to a generic reason
+    # and never fails the price sync.
+    if not p_codes:
+        return {}
+    try:
+        from api import l_token
+        from item_id_lookup import explain
+        l_found = explain({'Authorization': 'Bearer ' + l_token, 'Accept': 'application/json'}, p_codes)
+    except Exception as e:
+        log_error('Could not look up why items are not valid in P21: ' + str(e)[:300])
+        l_found = None
+
+    l_reasons = {}
+    for l_code in p_codes:
+        if l_found is None:
+            l_reason = 'P21 says this item ID is not valid'
+        elif l_code in l_found:
+            l_new, _, l_reason = l_found[l_code]
+            if l_new:
+                l_reason += ' -- Item ID Update can rename it automatically'
+        else:
+            l_reason = 'Item exists in P21 but pricing rejects it (check its location/company setup in P21)'
+        l_reasons[l_code] = l_reason
+        log_error('Item not valid in P21: ' + l_code + ' -- ' + l_reason)
+    return l_reasons
 
 
 def build_partial_order_alert(p_customer, p_order, p_order_no, p_order_items, p_dropped_item_ids):
@@ -540,6 +579,8 @@ def item_ids():
                 log_error('Item code not renamed: ' + r[1] + ' -- ' + r[4] + (': ' + r[5] if r[5] else ''))
 
         if l_rows:
+            l_report_path, l_xlsx = fix_item_ids.save_report(l_rows)
+            log_info('Report saved: ' + l_report_path)
             l_customer = get_customer_name()
             l_review = l_tot_cnt - l_succ_cnt
             email(
@@ -548,10 +589,10 @@ def item_ids():
                 str(l_tot_cnt) + ' item code(s) in Matrix are no longer recognized by P21.\n\n'
                 'Renamed to their current P21 ID: ' + str(l_succ_cnt) + '\n'
                 'Need a person to review (conflict / no match / error): ' + str(l_review) + '\n\n'
-                'Details are in the attached spreadsheet. To reverse this run: '
-                'python fix_item_ids.py --undo\n',
+                'Details are in the attached spreadsheet (also saved on the machine as ' + l_report_path + '). '
+                'To reverse this run: python fix_item_ids.py --undo\n',
                 False,
-                p_attachments=[('item_id_changes_' + l_customer + '.xlsx', fix_item_ids.report_xlsx(l_rows))]
+                p_attachments=[('item_id_changes_' + l_customer + '.xlsx', l_xlsx)]
             )
 
         stop_log('Item ID update process', l_succ_cnt, l_tot_cnt)
