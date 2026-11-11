@@ -52,6 +52,21 @@ def read_column_a(p_file):
     return l_items
 
 
+def p21_token():
+    # Exception text from requests would include the URL (and password), so
+    # only the exception type is reported.
+    try:
+        l_resp = requests.post(
+            get_base_url() + '/security/token/',
+            params={'username': get_api_username(), 'password': get_api_password()},
+            headers={'Content-Length': '0'}, timeout=30)
+    except requests.RequestException as e:
+        raise SystemExit('P21 token request failed: ' + type(e).__name__) from None
+    if l_resp.status_code != 200:
+        raise SystemExit('P21 token request failed: HTTP ' + str(l_resp.status_code) + ' -- check P21 API Base URL')
+    return l_resp.text
+
+
 def main():
     l_args = argparse.ArgumentParser()
     l_args.add_argument('file')
@@ -67,12 +82,7 @@ def main():
     print(str(len(l_items)) + ' items, customer ' + l_customer)
 
     l_base = get_base_url()
-    l_token = requests.post(
-        l_base + '/security/token/?username=' + get_api_username() + '&password=' + get_api_password(),
-        headers={'Content-Length': '0'}, timeout=30)
-    if l_token.status_code != 200:
-        raise SystemExit('P21 token request failed: HTTP ' + str(l_token.status_code) + ' -- check P21 API Base URL')
-    l_headers = {'Authorization': 'Bearer ' + l_token.text, 'Content-Length': '0'}
+    l_headers = {'Authorization': 'Bearer ' + p21_token(), 'Content-Length': '0'}
 
     l_out = path.splitext(l_args.file)[0] + '_prices_' + l_customer + '.csv'
     with open(l_out, 'w', newline='') as f:
