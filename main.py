@@ -516,6 +516,55 @@ def orders(p_quote=None):
         raise
 
 
+def item_ids():
+    # Monthly: rename Matrix item codes P21 has replaced (see fix_item_ids.py).
+    # Emails a summary + .xlsx only when something was found. Imported here,
+    # not at the top, so nothing in it can ever break Price Sync/Auto Orders.
+    import fix_item_ids
+    l_tot_cnt = 0
+    l_succ_cnt = 0
+
+    start_log('Item ID update process')
+
+    try:
+        l_db_conn = connect_db()
+        l_rows = fix_item_ids.scan(l_db_conn.cursor(), p_progress=False)
+        l_succ_cnt = fix_item_ids.apply_changes(l_db_conn, l_rows)
+        close_db_conn(l_db_conn)
+        l_tot_cnt = len(l_rows)
+
+        for r in l_rows:
+            if r[4] == 'updated':
+                log_info('Item code renamed: ' + r[1] + ' -> ' + r[2] + ' (item_key ' + str(r[0]) + ')')
+            else:
+                log_error('Item code not renamed: ' + r[1] + ' -- ' + r[4] + (': ' + r[5] if r[5] else ''))
+
+        if l_rows:
+            l_customer = get_customer_name()
+            l_review = l_tot_cnt - l_succ_cnt
+            email(
+                'Matrix Item ID Update for ' + l_customer + ': ' + str(l_succ_cnt) + ' renamed, ' +
+                str(l_review) + ' need review',
+                str(l_tot_cnt) + ' item code(s) in Matrix are no longer recognized by P21.\n\n'
+                'Renamed to their current P21 ID: ' + str(l_succ_cnt) + '\n'
+                'Need a person to review (conflict / no match / error): ' + str(l_review) + '\n\n'
+                'Details are in the attached spreadsheet. To reverse this run: '
+                'python fix_item_ids.py --undo\n',
+                False,
+                p_attachments=[('item_id_changes_' + l_customer + '.xlsx', fix_item_ids.report_xlsx(l_rows))]
+            )
+
+        stop_log('Item ID update process', l_succ_cnt, l_tot_cnt)
+        health.record_run('item_ids', 'success', l_succ_cnt, l_tot_cnt)
+        rename_log()
+    except Exception:
+        l_traceback = traceback.format_exc()
+        log_error('Unhandled exception in item_ids():\n' + l_traceback)
+        health.record_event('run_failure', l_traceback)
+        health.record_run('item_ids', 'error', l_succ_cnt, l_tot_cnt)
+        raise
+
+
 def clear_stale_order(p_po_code):
     # Manual admin action: stop tracking a PO as stuck in-flight, after a
     # human has independently verified with P21 whether it actually went
@@ -540,7 +589,7 @@ def clear_stale_order(p_po_code):
 
 def main():
     parser = ArgumentParser(description='VMI Update Process')
-    actions = ['items', 'orders', 'images', 'catalog', 'clear_stale']
+    actions = ['items', 'orders', 'images', 'catalog', 'clear_stale', 'item_ids']
     levels = ['debug', 'info', 'warn', 'error']
     parser.add_argument('-a', choices=actions, default='items', dest='action')
     parser.add_argument('-l', choices=levels, default='info', dest='level')
@@ -567,6 +616,8 @@ def main():
         items()
     elif args.action.lower() == 'clear_stale':
         clear_stale_order(args.po_code)
+    elif args.action.lower() == 'item_ids':
+        item_ids()
 
 
 if __name__ == "__main__":

@@ -176,6 +176,7 @@ to `C:\update_process`:
 | VMI Catalog Sync | `python main.py -a catalog` | Daily | Optional — only add if `[health] catalog_endpoint_url` is configured in `config.ini`. Catalog data (price, description, type) changes infrequently, so daily is a reasonable default — separate cadence from the 15-minute health heartbeat is the point of this being its own action. |
 | VMI Health Reporter | `python health_reporter.py` | Every 15 minutes, indefinitely | **Own, independent** Task Scheduler entry — must keep running even if the tasks above hang or crash. Run whether user is logged on or not: **Yes** |
 | VMI Script Updates | `update_scripts.bat` | Monthly | Pulls the latest code via `git pull` |
+| VMI Item ID Update | `python main.py -a item_ids` | Monthly, 2nd at 00:30 | Renames Matrix item codes that P21 has replaced (P21 alternate codes, e.g. `SCTFG125-020` -> `SCT220004`). Only clear one-to-one replacements are renamed; conflicts and unmatched items are listed in an emailed .xlsx for review. Every rename is logged in `dbo.vmi_item_code_changes` (created automatically). Preview with `python fix_item_ids.py`; reverse the last run with `python fix_item_ids.py --undo` |
 Steps for this one: 
   1. Create Basic Task
   2. "VMI Monthly Script Update" or whatever title you want

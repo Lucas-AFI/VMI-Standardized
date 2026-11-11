@@ -84,7 +84,7 @@ CANONICAL_TASKS = [
         'key': 'price_sync',
         'name': 'VMI Price Sync',
         'match': lambda cmd, start_in: 'main.py' in cmd
-            and not re.search(r'-a\s+(orders|images|catalog|clear_stale)', cmd)
+            and not re.search(r'-a\s+(orders|images|catalog|clear_stale|item_ids)', cmd)
             and _in_this_folder(start_in),
         'program_is_python': True,
         'arguments': 'main.py',
@@ -116,6 +116,15 @@ CANONICAL_TASKS = [
             and _in_this_folder(start_in),
         'program_is_python': True,
         'arguments': 'main.py -a catalog',
+    },
+    {
+        'key': 'item_ids',
+        'name': 'VMI Item ID Update',
+        'match': lambda cmd, start_in: 'main.py' in cmd
+            and re.search(r'-a\s+item_ids', cmd)
+            and _in_this_folder(start_in),
+        'program_is_python': True,
+        'arguments': 'main.py -a item_ids',
     },
     {
         'key': 'health',

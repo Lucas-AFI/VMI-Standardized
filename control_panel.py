@@ -49,6 +49,10 @@ DEFAULT_IMAGE_FOLDER = r'C:\Program Files (x86)\MATRIX-TM\Images\ItemPictures'
 HHMM = r'^([01]\d|2[0-3]):[0-5]\d$'
 # Scheduled Tasks tab: tasks that run once a day, and the time pre-filled in the prompt.
 DAILY_DEFAULT_TIMES = {'price_sync': '01:00', 'orders': '10:30', 'images': '02:00', 'catalog': '03:00'}
+# (day of month, default time). Item IDs runs the day after script updates
+# (so it's on current code) and before the 01:00 price sync (so renamed
+# items get priced that same night).
+MONTHLY_DEFAULTS = {'script_updates': (1, '03:00'), 'item_ids': (2, '00:30')}
 
 LOGO_PATH = os.path.join(SCRIPT_DIR, 'assets', 'afi_logo.png')
 ICON_PATH = os.path.join(SCRIPT_DIR, 'assets', 'afi_icon.png')
@@ -406,6 +410,7 @@ class RunTab(ttk.Frame):
         ('Auto Orders (Quotes)', [sys.executable, 'main.py', '-a', 'orders', '-q']),
         ('Item Image Sync', [sys.executable, 'matrix_image_save.py']),
         ('Catalog Sync', [sys.executable, 'main.py', '-a', 'catalog']),
+        ('Item ID Report (no changes)', [sys.executable, 'fix_item_ids.py']),
         ('Health Reporter (single run)', [sys.executable, 'health_reporter.py']),
         ('Verify Config/Credentials', [sys.executable, 'collect_config.py', '--verify']),
         ('Pull Latest Updates', ['cmd', '/c', 'update_scripts.bat']),
@@ -533,12 +538,12 @@ class ScheduledTasksTab(ttk.Frame):
                 messagebox.showerror('Invalid time', 'Enter time as HH:MM, 24-hour (e.g. 06:00 or 18:30).')
                 return
             schedule_args = task_scheduler.schedule_args_daily(t)
-        elif key == 'script_updates':
+        elif key in MONTHLY_DEFAULTS:
             t = values.get('time', '')
             if not re.match(HHMM, t):
                 messagebox.showerror('Invalid time', 'Enter time as HH:MM, 24-hour (e.g. 06:00 or 18:30).')
                 return
-            schedule_args = task_scheduler.schedule_args_monthly_on_day(1, t)
+            schedule_args = task_scheduler.schedule_args_monthly_on_day(MONTHLY_DEFAULTS[key][0], t)
         else:  # health
             schedule_args = task_scheduler.schedule_args_minute(15)
 
@@ -582,12 +587,14 @@ class ScheduledTasksTab(ttk.Frame):
             entries['time'].insert(0, DAILY_DEFAULT_TIMES[key])
             entries['time'].grid(row=row, column=0, padx=10, pady=4, sticky='w')
             row += 1
-        elif key == 'script_updates':
-            ttk.Label(win, text='Time of day to run on the 1st of each month (HH:MM):').grid(
+        elif key in MONTHLY_DEFAULTS:
+            l_day, l_time = MONTHLY_DEFAULTS[key]
+            ttk.Label(win, text='Time of day to run on the ' + {1: '1st', 2: '2nd', 3: '3rd'}.get(l_day, str(l_day) + 'th') +
+                                ' of each month (HH:MM):').grid(
                 row=row, column=0, sticky='w', padx=10, pady=(10, 4))
             row += 1
             entries['time'] = ttk.Entry(win)
-            entries['time'].insert(0, '03:00')
+            entries['time'].insert(0, l_time)
             entries['time'].grid(row=row, column=0, padx=10, pady=4, sticky='w')
             row += 1
         elif key == 'health':
