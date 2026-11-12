@@ -127,16 +127,16 @@ def get_token():
 
 
 def get_customer_name():
-    """Get customer name from P21 for email subjects"""
+    """Get customer name from P21 for email subjects. Never raises: it's only
+    a label, so an odd P21 reply (e.g. an error with no <Customer>) must not
+    fail the run that's emailing -- falls back to the customer ID."""
     l_headers = {"Authorization": "Bearer " + l_token, "Content-Length": "0"}
     l_endpoint = l_base_url + '/entity/customers/AFI_' + get_customer_id()
-    l_response = _request_with_retry(requests.get, l_endpoint, headers=l_headers).text
     try:
-        l_dict = xmltodict.parse(l_response)
-        l_customer = l_dict['Customer']['CustomerName']
-    except xmltodict.expat.ExpatError:
-        l_customer = 'Unknown'
-    return l_customer.title()
+        l_response = _request_with_retry(requests.get, l_endpoint, headers=l_headers).text
+        return xmltodict.parse(l_response)['Customer']['CustomerName'].title()
+    except Exception:
+        return 'Customer ' + get_customer_id()
 
 
 def get_item(p_item):
