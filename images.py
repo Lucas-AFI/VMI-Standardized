@@ -54,7 +54,9 @@ def download_item_image(p_item_code):
         log_error('Image download failed for ' + p_item_code + ': ' + str(e))
         return 'error'
 
-    if l_response.status_code == 404:
+    # S3 answers 403, not 404, for a missing key when listing is disabled
+    # (confirmed on the catsy bucket with a made-up item code).
+    if l_response.status_code in (403, 404):
         return 'missing'
     elif l_response.status_code != 200:
         log_error('Image host returned HTTP ' + str(l_response.status_code) + ' for ' + p_item_code)
@@ -88,7 +90,7 @@ def sync_images():
 
         for row in l_rows:
             l_tot_cnt += 1
-            l_result = download_item_image(row.item_code)
+            l_result = download_item_image(str(row.item_code).strip())
 
             if l_result == 'ok':
                 log_debug('Downloaded image: ' + row.item_code + '.jpg')
