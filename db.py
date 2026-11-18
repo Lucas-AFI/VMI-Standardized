@@ -123,7 +123,13 @@ SHORTAGE_SQL = (
     's.stock_qty, s.min_stock, s.max_stock, s.ordered_qty, s.last_issue '
     'from dbo.V_REPORT_SHORTAGE s '
     'where s.item_key in (select item_key from dbo.ent_item_suppliers '
-    'where supplier_key = ' + str(SUPPLIER_KEY) + ' and bool_bitul = 0)'
+    'where supplier_key = ' + str(SUPPLIER_KEY) + ' and bool_bitul = 0) '
+    # The view unions every stock level (bin/cabinet/item/site), but Matrix
+    # orders only at the level the site's cabinets are set to. Without this,
+    # item-level rows (calculated min only) flagged items whose cabinet-level
+    # override min was fine (Axem, 2026-11: cabinets at level 2, rows at 3).
+    'and rtrim(cast(s.calc_level as varchar(10))) in '
+    '(select rtrim(cast(calc_level as varchar(10))) from dbo.ent_cabinet_master where bool_bitul = 0)'
 )
 
 
